@@ -1,0 +1,37 @@
+# Render Blueprint —— 单服务一键部署（零手动配置）
+# 一个 Web 服务同时托管「前端 + API」，外加一个托管数据库。
+# 前后端同源：无需反向代理、无需 CORS、无需填任何跨服务地址。
+#
+# 用法：仓库推到 GitHub → Render → New → Blueprint → 选仓库 → 填管理员密码 → Apply
+#   完成后打开该服务的网址即可直接使用；数据用平台内「导入/导出」上传按钮导入。
+
+databases:
+  - name: hsr-db
+    databaseName: hsr
+    user: hsr
+    plan: free            # 试用；正式使用请改付费实例（免费库有存续期限制）
+
+services:
+  - type: web
+    name: hsr
+    runtime: docker
+    dockerfilePath: ./Dockerfile      # 合并镜像：构建前端 + 后端托管
+    dockerContext: .
+    plan: free            # 免费实例闲置会休眠，首次访问冷启动较慢；正式用付费
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: hsr-db
+          property: connectionString   # 自动注入数据库连接串
+      - key: SECRET_KEY
+        generateValue: true            # 自动生成随机密钥
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "720"
+      - key: ADMIN_USERNAME
+        value: admin
+      - key: ADMIN_PASSWORD
+        sync: false                    # Apply 时提示输入（不写进仓库）
+      - key: ADMIN_NAME
+        value: 标准管理员

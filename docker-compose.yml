@@ -1,0 +1,71 @@
+# 健康指标标准修订协作平台 —— 一键启动编排
+# 用法： docker compose up -d --build
+#   前端  http://localhost:8080  （admin / admin123）
+#   后端  http://localhost:8000/docs
+
+x-backend-env: &backend-env
+  DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-hsr}:${POSTGRES_PASSWORD:-hsr_password}@db:5432/${POSTGRES_DB:-hsr}
+  SECRET_KEY: ${SECRET_KEY:-change-me-please-use-a-long-random-string}
+  ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-720}
+  CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+  ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+  ADMIN_NAME: ${ADMIN_NAME:-标准管理员}
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-hsr}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hsr_password}
+      POSTGRES_DB: ${POSTGRES_DB:-hsr}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hsr} -d ${POSTGRES_DB:-hsr}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    ports:
+      - "5432:5432"      # 如无需本地直连数据库，可删除此行
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      <<: *backend-env
+    volumes:
+      - ./data:/data     # 把待导入的 .xlsx 放到宿主机 ./data 目录
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE: /api/v1
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+  # 一次性导入服务（默认不随 up 启动；按需手动运行）
+  importer:
+    build: ./backend
+    profiles: ["import"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      <<: *backend-env
+    volumes:
+      - ./data:/data
+    command: ["python", "scripts/import_xlsx.py", "/data/2018卫生统计指标完整.xlsx"]
+
+volumes:
+  pgdata:

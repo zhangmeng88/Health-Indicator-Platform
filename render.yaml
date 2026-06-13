@@ -9,12 +9,14 @@ databases:
   - name: hsr-db
     databaseName: hsr
     user: hsr
+    region: oregon       # 数据库与服务必须同区域，内网主机名才能解析
     plan: free            # 试用；正式使用请改付费实例（免费库有存续期限制）
 
 services:
   - type: web
     name: hsr
     runtime: docker
+    region: oregon       # 与数据库同区域
     dockerfilePath: ./Dockerfile      # 合并镜像：构建前端 + 后端托管
     dockerContext: .
     plan: free            # 免费实例闲置会休眠，首次访问冷启动较慢；正式用付费

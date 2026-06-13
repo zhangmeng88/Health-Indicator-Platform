@@ -36,3 +36,12 @@
 
 - **本机一键**：`docker compose up -d --build`（见根 `README.md`），三容器（db + 后端 + 前端 nginx），适合本地/内网。
 - 单服务镜像也可本机直接跑：`docker build -t hsr . && docker run -p 8000:8000 -e DATABASE_URL=... hsr`。
+
+## 排查：启动报 “could not translate host name dpg-...”
+
+这是后端连不上数据库（内网主机名解析失败），两种原因与处理：
+
+1. **首次部署数据库晚于服务上线**：后端已内置启动重试（最多等约 90 秒），通常会自愈；若仍失败，在服务页点 **Manual Deploy → Restart** 再试一次。
+2. **服务与数据库不在同一区域**：内网主机名只能同区域解析。`render.yaml` 已把两者都钉在 `oregon`。若你之前用旧 Blueprint 建过别的区域的 `hsr-db`：请先在控制台**删除旧的 `hsr-db` 数据库和 `hsr` 服务**，再重新 **Apply** Blueprint，让两者在同区域一起新建。
+
+> 如需更低的中国访问延迟，可把 `render.yaml` 里数据库与服务的 `region` **同时**改为 `singapore` 后重新 Apply（务必两处一致）。

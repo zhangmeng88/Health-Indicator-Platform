@@ -17,7 +17,21 @@ from .routers import auth, users, classifications, indicators, suggestions, comm
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    Base.metadata.create_all(bind=engine)   # 开发期建表；生产建议改用 Alembic 迁移
+    import time
+    from sqlalchemy.exc import OperationalError
+    # 等待数据库就绪再建表（Render 等平台首次部署时数据库可能晚于服务上线）
+    last_err = None
+    for attempt in range(1, 31):          # 最多约 90 秒
+        try:
+            Base.metadata.create_all(bind=engine)
+            last_err = None
+            break
+        except OperationalError as e:
+            last_err = e
+            print(f"[startup] 数据库尚未就绪，第 {attempt}/30 次重试…", flush=True)
+            time.sleep(3)
+    if last_err is not None:
+        raise last_err
     db = SessionLocal()
     try:
         seed(db)

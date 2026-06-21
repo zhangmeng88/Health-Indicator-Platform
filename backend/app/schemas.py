@@ -87,6 +87,21 @@ class IndicatorCreate(IndicatorBase):
     pass
 
 
+class IndicatorUpdate(BaseModel):
+    identifier: Optional[str] = None
+    name_cn: Optional[str] = None
+    name_en: Optional[str] = None
+    unit: Optional[str] = None
+    definition: Optional[str] = None
+    method: Optional[str] = None
+    description: Optional[str] = None
+    survey_method: Optional[str] = None
+    data_source: Optional[str] = None
+    frequency: Optional[str] = None
+    classification_id: Optional[int] = None
+    source_standard_id: Optional[int] = None
+
+
 class IndicatorOut(IndicatorBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -128,6 +143,18 @@ class SuggestionOut(BaseModel):
     reviewed_at: Optional[datetime]
     review_note: str
     indicator_name: Optional[str] = None
+
+
+# ---------- 修改历史 ----------
+class HistoryEntry(BaseModel):
+    id: int
+    created_at: Optional[datetime] = None
+    actor_name: Optional[str] = None
+    action: str
+    entity_type: Optional[str] = None
+    entity_id: Optional[int] = None
+    indicator_name: Optional[str] = None
+    detail: Optional[Any] = None
 
 
 # ---------- Comment ----------

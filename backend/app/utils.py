@@ -40,3 +40,31 @@ def build_tree(db: Session, parent_id: int | None = None) -> list[schemas.Classi
 def audit(db: Session, actor_id: int | None, action: str, entity_type: str, entity_id: int | None, detail: dict | None = None):
     db.add(models.AuditLog(actor_id=actor_id, action=action, entity_type=entity_type,
                            entity_id=entity_id, detail=detail or {}))
+
+
+def _class_label(db: Session, cid):
+    if not cid:
+        return ""
+    c = db.get(models.Classification, cid)
+    return c.name if c else f"#{cid}"
+
+
+def _src_label(db: Session, sid):
+    if not sid:
+        return ""
+    s = db.get(models.SourceStandard, sid)
+    return s.title if s else f"#{sid}"
+
+
+def change_detail(db: Session, ind, changes: dict) -> dict:
+    """构造 {字段: {old, new}} 的变更详情。须在把变更写入 ind 之前调用。"""
+    out = {}
+    for k, new in changes.items():
+        old = getattr(ind, k, None)
+        if k == "classification_id":
+            out[k] = {"old": _class_label(db, old), "new": _class_label(db, new)}
+        elif k == "source_standard_id":
+            out[k] = {"old": _src_label(db, old), "new": _src_label(db, new)}
+        else:
+            out[k] = {"old": "" if old is None else str(old), "new": "" if new is None else str(new)}
+    return out

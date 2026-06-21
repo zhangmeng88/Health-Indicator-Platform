@@ -3,10 +3,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..security import get_current_user
+from ..security import get_current_user, require_admin
 from ..models import Indicator, IndicatorStatus, SourceStandard, User
-from ..schemas import IndicatorOut, SourceStandardOut
-from ..utils import indicator_out
+from ..schemas import IndicatorOut, SourceStandardOut, IndicatorCreate, IndicatorUpdate
+from ..utils import indicator_out, audit, change_detail
 
 router = APIRouter(tags=["指标"])
 
@@ -38,3 +38,40 @@ def get_indicator(indicator_id: int, db: Session = Depends(get_db), _: User = De
 @router.get("/source-standards", response_model=list[SourceStandardOut], summary="来源标准/部分列表")
 def list_sources(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     return db.query(SourceStandard).order_by(SourceStandard.id).all()
+
+
+# ---------- 管理员直接增改删（立即生效，不经审核） ----------
+
+@router.post("/indicators", response_model=IndicatorOut, status_code=201, summary="新增指标（管理员，立即生效）")
+def create_indicator(body: IndicatorCreate, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+    ind = Indicator(status=IndicatorStatus.active, created_by=admin.id, **body.model_dump())
+    db.add(ind); db.flush()
+    audit(db, admin.id, "admin_create", "indicator", ind.id, {"name_cn": ind.name_cn})
+    db.commit(); db.refresh(ind)
+    return indicator_out(db, ind)
+
+
+@router.patch("/indicators/{indicator_id}", response_model=IndicatorOut, summary="修改指标（管理员，立即生效）")
+def update_indicator(indicator_id: int, body: IndicatorUpdate, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+    ind = db.get(Indicator, indicator_id)
+    if not ind:
+        raise HTTPException(404, "指标不存在")
+    changes = body.model_dump(exclude_unset=True)
+    detail = change_detail(db, ind, changes)            # 在应用前记录旧值→新值
+    for k, v in changes.items():
+        setattr(ind, k, v)
+    if changes:
+        ind.version = (ind.version or 1) + 1
+    audit(db, admin.id, "admin_update", "indicator", ind.id, {"name_cn": ind.name_cn, "changes": detail})
+    db.commit(); db.refresh(ind)
+    return indicator_out(db, ind)
+
+
+@router.delete("/indicators/{indicator_id}", status_code=204, summary="删除指标（管理员，软删除立即生效）")
+def delete_indicator(indicator_id: int, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+    ind = db.get(Indicator, indicator_id)
+    if not ind:
+        raise HTTPException(404, "指标不存在")
+    ind.status = IndicatorStatus.deleted
+    audit(db, admin.id, "admin_delete", "indicator", ind.id, {"name_cn": ind.name_cn})
+    db.commit()

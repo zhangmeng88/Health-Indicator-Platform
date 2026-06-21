@@ -85,7 +85,6 @@ def export_word(admin: User = Depends(require_admin), db: Session = Depends(get_
 
     # 每个指标按此顺序，逐行输出（左列字段名，右列内容）
     FIELDS = [
-        ("来源标准/部分", lambda i: i.source_standard.title if i.source_standard else ""),
         ("标识符", lambda i: i.identifier),
         ("中文名称", lambda i: i.name_cn),
         ("英文名称", lambda i: i.name_en),
@@ -114,6 +113,10 @@ def export_word(admin: User = Depends(require_admin), db: Session = Depends(get_
         style_run(run, bold=bold)
 
     doc = Document()
+    # 页边距收窄，给内容列更多宽度
+    sec = doc.sections[0]
+    sec.left_margin = Cm(2)
+    sec.right_margin = Cm(2)
     # 文档默认样式：中文宋体、英文 Times New Roman
     normal = doc.styles["Normal"]
     normal.font.name = "Times New Roman"
@@ -142,8 +145,8 @@ def export_word(admin: User = Depends(require_admin), db: Session = Depends(get_
                     cells = tbl.add_row().cells
                     write_cell(cells[0], label, bold=True)
                     write_cell(cells[1], getter(ind))
-                    cells[0].width = Cm(3.2)
-                    cells[1].width = Cm(13.8)
+                    cells[0].width = Cm(2.2)
+                    cells[1].width = Cm(14.8)
                 doc.add_paragraph()  # 指标间留白
             emit(n.id, depth + 1)
 

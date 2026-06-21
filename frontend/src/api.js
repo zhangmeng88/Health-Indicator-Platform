@@ -91,6 +91,12 @@ export const api = {
     return request(`/indicators?${p.toString()}`);
   },
   getIndicator: (id) => request(`/indicators/${id}`),
+  // 管理员直接增改删（立即生效）
+  createIndicator: (body) => request("/indicators", { method: "POST", body }),
+  updateIndicator: (id, body) => request(`/indicators/${id}`, { method: "PATCH", body }),
+  deleteIndicator: (id) => request(`/indicators/${id}`, { method: "DELETE" }),
+  getHistory: ({ limit = 300, indicatorId } = {}) => request(`/history?limit=${limit}${indicatorId ? `&indicator_id=${indicatorId}` : ""}`),
+  exportHistory: (indicatorId) => download(`/history/export${indicatorId ? `?indicator_id=${indicatorId}` : ""}`, "修改历史.xlsx"),
 
   // 建议
   getSuggestions: ({ status, type, mine } = {}) => {

@@ -13,7 +13,7 @@ from ..security import get_current_user, require_admin
 from ..models import (Suggestion, SuggestionType, SuggestionStatus, Indicator,
                       IndicatorStatus, User)
 from ..schemas import SuggestionCreate, SuggestionOut, SuggestionReview
-from ..utils import suggestion_out, audit
+from ..utils import suggestion_out, audit, change_detail
 
 router = APIRouter(prefix="/suggestions", tags=["建议审核"])
 
@@ -61,20 +61,22 @@ def _apply(db: Session, s: Suggestion, admin: User):
         if not ind.name_cn:
             raise HTTPException(400, "建议内容缺少中文名称")
         db.add(ind); db.flush()
-        audit(db, admin.id, "accept_add", "indicator", ind.id, {"suggestion": s.id})
+        audit(db, admin.id, "accept_add", "indicator", ind.id, {"suggestion": s.id, "name_cn": ind.name_cn})
     elif s.type == SuggestionType.edit:
         ind = db.get(Indicator, s.indicator_id)
         if not ind:
             raise HTTPException(404, "目标指标不存在")
+        detail = change_detail(db, ind, fields)            # 记录旧值→新值
         for k, v in fields.items():
             setattr(ind, k, v)
         ind.version += 1
-        audit(db, admin.id, "accept_edit", "indicator", ind.id, {"suggestion": s.id, "changed": list(fields)})
+        audit(db, admin.id, "accept_edit", "indicator", ind.id,
+              {"suggestion": s.id, "name_cn": ind.name_cn, "changes": detail})
     elif s.type == SuggestionType.delete:
         ind = db.get(Indicator, s.indicator_id)
         if ind:
             ind.status = IndicatorStatus.deleted
-            audit(db, admin.id, "accept_delete", "indicator", ind.id, {"suggestion": s.id})
+            audit(db, admin.id, "accept_delete", "indicator", ind.id, {"suggestion": s.id, "name_cn": ind.name_cn})
 
 
 @router.post("/{sug_id}/accept", response_model=SuggestionOut, summary="采纳建议（管理员）")

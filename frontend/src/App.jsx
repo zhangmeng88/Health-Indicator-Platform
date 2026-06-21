@@ -3,7 +3,7 @@ import {
   LogIn, LogOut, RefreshCw, Users, ListTree, ClipboardCheck, Download,
   Search, Plus, Pencil, Trash2, MessageSquare, Check, X, ChevronRight,
   ChevronDown, KeyRound, ShieldCheck, FileText, FileSpreadsheet,
-  AlertCircle, Layers, BookOpen, Clock, UserPlus, Star, Upload
+  AlertCircle, Layers, BookOpen, Clock, UserPlus, Star, Upload, History
 } from "lucide-react";
 import { api, tokenStore, setUnauthorizedHandler } from "./api";
 
@@ -60,6 +60,21 @@ function findPath(nodes, id, path = []) {
   return null;
 }
 const srcTitle = (sources, id) => sources.find((s) => s.id === id)?.title || "";
+
+// 在树中查找节点
+function findNode(nodes, id) {
+  for (const n of nodes) {
+    if (n.id === id) return n;
+    if (n.children?.length) { const r = findNode(n.children, id); if (r) return r; }
+  }
+  return null;
+}
+// 收集某节点及其所有后代的 id（用于按上级分类筛选）
+function subtreeIds(node) {
+  const ids = [node.id];
+  for (const c of node.children || []) ids.push(...subtreeIds(c));
+  return ids;
+}
 
 /* ================= 通用组件 ================= */
 const Badge = ({ children, cls }) => <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${cls}`}>{children}</span>;
@@ -147,6 +162,7 @@ export default function App() {
     { id: "review", label: "建议审核", icon: ClipboardCheck, badge: pending },
     { id: "hierarchy", label: "分类层级", icon: ListTree },
     { id: "accounts", label: "专家账户", icon: Users },
+    { id: "history", label: "修改历史", icon: History },
     { id: "export", label: "导入 / 导出", icon: Download },
   ];
   const expertTabs = [
@@ -185,6 +201,7 @@ export default function App() {
           {tab === "review" && <Review {...ctx} />}
           {tab === "hierarchy" && <Hierarchy {...ctx} />}
           {tab === "accounts" && <Accounts {...ctx} />}
+          {tab === "history" && <History_ {...ctx} />}
           {tab === "export" && <Export {...ctx} />}
           {tab === "mine" && <MySuggestions {...ctx} />}
         </div>
@@ -224,9 +241,14 @@ function Browse(ctx) {
   const [q, setQ] = useState(""); const [classFilter, setClassFilter] = useState("all");
   const [selId, setSelId] = useState(null); const [modal, setModal] = useState(null);
   const flat = useMemo(() => flatten(hierarchy), [hierarchy]);
+  const filterIds = useMemo(() => {
+    if (classFilter === "all") return null;
+    const node = findNode(hierarchy, Number(classFilter));
+    return new Set(node ? subtreeIds(node) : [Number(classFilter)]);
+  }, [classFilter, hierarchy]);
   const filtered = indicators.filter((i) => {
     const okQ = !q || (i.name_cn || "").includes(q) || (i.identifier || "").toLowerCase().includes(q.toLowerCase());
-    const okC = classFilter === "all" || i.classification_id === Number(classFilter);
+    const okC = !filterIds || filterIds.has(i.classification_id);
     return okQ && okC;
   });
   const sel = indicators.find((i) => i.id === selId) || null;
@@ -242,7 +264,7 @@ function Browse(ctx) {
               <option value="all">全部分类</option>
               {flat.map((f) => <option key={f.id} value={f.id}>{"　".repeat(f.depth) + f.name}</option>)}
             </select>
-            <Btn size="sm" onClick={() => setModal({ type: "add" })}><Plus size={15} /> 建议新增</Btn>
+            <Btn size="sm" onClick={() => setModal({ type: "add" })}><Plus size={15} /> {user.role === "admin" ? "新增指标" : "建议新增"}</Btn>
           </div>
         </div>
         <div className="space-y-2">
@@ -269,6 +291,8 @@ function Browse(ctx) {
 function IndicatorDetail({ indicator, ctx, onEdit, onDelete }) {
   const { hierarchy, sources, user, flash, guard, reloadSuggestions } = ctx;
   const [comments, setComments] = useState([]); const [comment, setComment] = useState("");
+  const [trail, setTrail] = useState(null);
+  const loadTrail = () => guard(async () => setTrail(await api.getHistory({ indicatorId: indicator.id })));
   const path = findPath(hierarchy, indicator.classification_id);
   const loadComments = useCallback(() => guard(async () => setComments(await api.getComments(indicator.id))), [indicator.id, guard]);
   useEffect(() => { loadComments(); }, [loadComments]);
@@ -282,7 +306,7 @@ function IndicatorDetail({ indicator, ctx, onEdit, onDelete }) {
           <div><h2 className="text-lg font-semibold text-slate-800">{indicator.name_cn}</h2>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500"><span className="font-mono">{indicator.identifier}</span>
               {path && <Badge cls="bg-slate-100 text-slate-600 border-slate-200"><Layers size={11} />{path.join(" › ")}</Badge>}</div></div>
-          <div className="flex gap-2"><Btn size="sm" variant="outline" onClick={onEdit}><Pencil size={14} /> 建议修改</Btn><Btn size="sm" variant="ghost" onClick={onDelete}><Trash2 size={14} className="text-rose-500" /></Btn></div>
+          <div className="flex gap-2"><Btn size="sm" variant="outline" onClick={onEdit}><Pencil size={14} /> {user.role === "admin" ? "修改" : "建议修改"}</Btn><Btn size="sm" variant="ghost" onClick={onDelete}><Trash2 size={14} className="text-rose-500" /></Btn></div>
         </div>
         <dl className="divide-y divide-slate-100">
           {DETAIL_ORDER.map((k) => (<div key={k} className="grid grid-cols-4 gap-3 py-2">
@@ -301,12 +325,24 @@ function IndicatorDetail({ indicator, ctx, onEdit, onDelete }) {
             <p className="mt-0.5 text-sm text-slate-700">{c.body}</p></div>))}
         </div>
       </div>
+      {user.role === "admin" && (
+        <div className="rounded-lg border border-slate-200 bg-white p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-700"><History size={15} /> 修改轨迹</h3>
+            {trail !== null && trail.length > 0 && <Btn size="sm" variant="outline" onClick={() => guard(async () => { await api.exportHistory(indicator.id); flash("Excel 已开始下载"); })}><FileSpreadsheet size={14} /> 导出</Btn>}
+          </div>
+          {trail === null
+            ? <Btn size="sm" variant="outline" onClick={loadTrail}>查看该指标的全部修改记录</Btn>
+            : <HistoryList rows={trail} showName={false} />}
+        </div>
+      )}
     </div>
   );
 }
 
 function IndicatorForm({ mode, indicator, ctx, onClose }) {
-  const { hierarchy, sources, flash, guard, reloadSuggestions } = ctx;
+  const { hierarchy, sources, flash, guard, reloadSuggestions, reloadIndicators, user } = ctx;
+  const isAdmin = user.role === "admin";
   const flat = useMemo(() => flatten(hierarchy), [hierarchy]);
   const blank = Object.fromEntries(META_FIELDS.map((f) => [f.key, ""]));
   const [form, setForm] = useState(() => mode === "edit"
@@ -324,24 +360,41 @@ function IndicatorForm({ mode, indicator, ctx, onClose }) {
         const payload = {};
         META_FIELDS.forEach((f) => { payload[f.key] = f.key === "source_standard_id" ? numOrNull(form[f.key]) : (form[f.key] || ""); });
         payload.classification_id = numOrNull(form.classification_id);
-        await api.createSuggestion({ type: "add", payload, rationale, priority: form.priority });
-        flash("新增指标建议已提交");
+        if (isAdmin) {
+          await api.createIndicator(payload);
+          await reloadIndicators();
+          flash("指标已新增");
+        } else {
+          await api.createSuggestion({ type: "add", payload, rationale, priority: form.priority });
+          await reloadSuggestions();
+          flash("新增指标建议已提交");
+        }
       } else {
         const changes = {};
         TEXT_KEYS.forEach((k) => { if ((form[k] || "") !== (indicator[k] || "")) changes[k] = form[k]; });
         if (numOrNull(form.source_standard_id) !== (indicator.source_standard_id ?? null)) changes.source_standard_id = numOrNull(form.source_standard_id);
         if (numOrNull(form.classification_id) !== (indicator.classification_id ?? null)) changes.classification_id = numOrNull(form.classification_id);
         if (Object.keys(changes).length === 0) { setBusy(false); return flash("未检测到任何修改"); }
-        await api.createSuggestion({ type: "edit", indicator_id: indicator.id, payload: changes, rationale });
-        flash("修改建议已提交");
+        if (isAdmin) {
+          await api.updateIndicator(indicator.id, changes);
+          await reloadIndicators();
+          flash("修改已保存，立即生效");
+        } else {
+          await api.createSuggestion({ type: "edit", indicator_id: indicator.id, payload: changes, rationale });
+          await reloadSuggestions();
+          flash("修改建议已提交");
+        }
       }
-      await reloadSuggestions();
       onClose();
     } finally { setBusy(false); }
   });
 
+  const title = mode === "add"
+    ? (isAdmin ? "新增指标" : "建议新增指标")
+    : (isAdmin ? `修改指标：${indicator.name_cn}` : `建议修改：${indicator.name_cn}`);
+
   return (
-    <Modal wide title={mode === "add" ? "建议新增指标" : `建议修改：${indicator.name_cn}`} onClose={onClose}>
+    <Modal wide title={title} onClose={onClose}>
       <div className="grid grid-cols-2 gap-3">
         {META_FIELDS.map((f) => (
           <Field key={f.key} label={f.label + (f.key === "name_cn" ? " *" : "")} span2={f.span2}>
@@ -363,30 +416,49 @@ function IndicatorForm({ mode, indicator, ctx, onClose }) {
             {flat.map((f) => <option key={f.id} value={f.id}>{"　".repeat(f.depth) + f.name}</option>)}
           </select>
         </Field>
-        {mode === "add" && (
+        {!isAdmin && mode === "add" && (
           <Field label="推荐优先级 *" span2>
             <div className="flex gap-2">{Object.entries(PRIORITY).map(([k, v]) => (
               <button key={k} type="button" onClick={() => set("priority", k)} className={`flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm transition-colors ${form.priority === k ? v.cls + " ring-1 ring-current" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
                 <Star size={14} fill={form.priority === k ? "currentColor" : "none"} /> {v.label}</button>))}</div>
           </Field>
         )}
-        <Field label={mode === "add" ? "推荐理由" : "修改理由"} span2><textarea rows={2} className={inputCls} value={rationale} onChange={(e) => setRationale(e.target.value)} placeholder="请说明依据与理由" /></Field>
+        {!isAdmin && (
+          <Field label={mode === "add" ? "推荐理由" : "修改理由"} span2><textarea rows={2} className={inputCls} value={rationale} onChange={(e) => setRationale(e.target.value)} placeholder="请说明依据与理由" /></Field>
+        )}
       </div>
-      <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4"><Btn variant="outline" onClick={onClose}>取消</Btn><Btn onClick={submit} disabled={busy}><Check size={15} /> 提交建议</Btn></div>
+      {isAdmin && <p className="mt-3 flex items-center gap-1.5 rounded-md bg-teal-50 px-3 py-2 text-xs text-teal-700"><AlertCircle size={13} /> 管理员修改将立即生效，无需审核。</p>}
+      <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4"><Btn variant="outline" onClick={onClose}>取消</Btn><Btn onClick={submit} disabled={busy}><Check size={15} /> {isAdmin ? (mode === "add" ? "新增" : "保存") : "提交建议"}</Btn></div>
     </Modal>
   );
 }
 
 function DeleteForm({ indicator, ctx, onClose }) {
-  const { flash, guard, reloadSuggestions } = ctx; const [rationale, setRationale] = useState("");
-  const submit = () => guard(async () => { if (!rationale.trim()) return flash("请填写删除理由");
-    await api.createSuggestion({ type: "delete", indicator_id: indicator.id, payload: {}, rationale });
-    await reloadSuggestions(); flash("删除建议已提交"); onClose(); });
+  const { flash, guard, reloadSuggestions, reloadIndicators, user } = ctx;
+  const isAdmin = user.role === "admin";
+  const [rationale, setRationale] = useState("");
+  const submit = () => guard(async () => {
+    if (isAdmin) {
+      await api.deleteIndicator(indicator.id);
+      await reloadIndicators();
+      flash("指标已删除"); onClose();
+    } else {
+      if (!rationale.trim()) return flash("请填写删除理由");
+      await api.createSuggestion({ type: "delete", indicator_id: indicator.id, payload: {}, rationale });
+      await reloadSuggestions(); flash("删除建议已提交"); onClose();
+    }
+  });
   return (
-    <Modal title={`建议删除：${indicator.name_cn}`} onClose={onClose}>
-      <p className="mb-3 flex items-center gap-1.5 rounded-md bg-rose-50 px-3 py-2 text-xs text-rose-700"><AlertCircle size={13} /> 该操作将作为删除建议提交，经管理员审核通过后该指标才会被移除。</p>
-      <Field label="删除理由 *"><textarea rows={3} className={inputCls} value={rationale} onChange={(e) => setRationale(e.target.value)} placeholder="请说明建议删除该指标的理由" /></Field>
-      <div className="mt-4 flex justify-end gap-2"><Btn variant="outline" onClick={onClose}>取消</Btn><Btn variant="danger" onClick={submit}><Trash2 size={15} /> 提交删除建议</Btn></div>
+    <Modal title={isAdmin ? `删除指标：${indicator.name_cn}` : `建议删除：${indicator.name_cn}`} onClose={onClose}>
+      {isAdmin ? (
+        <p className="mb-3 flex items-center gap-1.5 rounded-md bg-rose-50 px-3 py-2 text-xs text-rose-700"><AlertCircle size={13} /> 确认删除该指标？删除后立即从标准中移除（软删除）。</p>
+      ) : (
+        <>
+          <p className="mb-3 flex items-center gap-1.5 rounded-md bg-rose-50 px-3 py-2 text-xs text-rose-700"><AlertCircle size={13} /> 该操作将作为删除建议提交，经管理员审核通过后该指标才会被移除。</p>
+          <Field label="删除理由 *"><textarea rows={3} className={inputCls} value={rationale} onChange={(e) => setRationale(e.target.value)} placeholder="请说明建议删除该指标的理由" /></Field>
+        </>
+      )}
+      <div className="mt-4 flex justify-end gap-2"><Btn variant="outline" onClick={onClose}>取消</Btn><Btn variant="danger" onClick={submit}><Trash2 size={15} /> {isAdmin ? "确认删除" : "提交删除建议"}</Btn></div>
     </Modal>
   );
 }
@@ -585,6 +657,82 @@ function Accounts(ctx) {
         <Field label="新密码"><input className={inputCls} value={newPass} onChange={(e) => setNewPass(e.target.value)} /></Field>
         <div className="mt-4 flex justify-end gap-2"><Btn variant="outline" onClick={() => setResetFor(null)}>取消</Btn><Btn onClick={() => resetPass(resetFor)}>确认重置</Btn></div>
       </Modal>)}
+    </div>
+  );
+}
+
+/* ------------------------- 修改历史（管理员） ------------------------- */
+const HISTORY_ACTIONS = {
+  admin_create: { label: "管理员新增", cls: "bg-emerald-100 text-emerald-700" },
+  admin_update: { label: "管理员修改", cls: "bg-sky-100 text-sky-700" },
+  admin_delete: { label: "管理员删除", cls: "bg-rose-100 text-rose-700" },
+  accept_add: { label: "采纳·新增", cls: "bg-emerald-100 text-emerald-700" },
+  accept_edit: { label: "采纳·修改", cls: "bg-sky-100 text-sky-700" },
+  accept_delete: { label: "采纳·删除", cls: "bg-rose-100 text-rose-700" },
+  reject: { label: "驳回建议", cls: "bg-slate-200 text-slate-600" },
+};
+
+const fmtTime = (s) => (s ? new Date(s.endsWith && s.endsWith("Z") ? s : s + "Z").toLocaleString("zh-CN", { hour12: false }) : "");
+
+function ChangeLines({ detail }) {
+  if (detail?.changes && typeof detail.changes === "object" && !Array.isArray(detail.changes)) {
+    return (
+      <div className="mt-1.5 space-y-1">
+        {Object.entries(detail.changes).map(([k, ov]) => (
+          <div key={k} className="text-xs leading-relaxed">
+            <span className="text-slate-500">{FIELD_LABEL[k] || k}：</span>
+            <span className="rounded bg-rose-50 px-1 text-rose-500 line-through">{(ov && ov.old) || "（空）"}</span>
+            <span className="mx-1 text-slate-400">→</span>
+            <span className="rounded bg-emerald-50 px-1 text-emerald-700">{(ov && ov.new) || "（空）"}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (Array.isArray(detail?.changed) && detail.changed.length) {
+    return <div className="mt-1 text-xs text-slate-500">变更字段：{detail.changed.map((k) => FIELD_LABEL[k] || k).join("、")}</div>;
+  }
+  return null;
+}
+
+function HistoryList({ rows, showName = true }) {
+  if (!rows.length) return <p className="rounded-lg border border-dashed border-slate-200 p-8 text-center text-sm text-slate-400">暂无修改记录</p>;
+  return (
+    <ol className="relative ml-1 border-l border-slate-200 pl-5">
+      {rows.map((e) => {
+        const a = HISTORY_ACTIONS[e.action] || { label: e.action, cls: "bg-slate-100 text-slate-600" };
+        return (
+          <li key={e.id} className="mb-5">
+            <span className="absolute -left-[7px] mt-1.5 h-3 w-3 rounded-full border-2 border-white bg-teal-400" />
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`rounded px-2 py-0.5 text-xs font-medium ${a.cls}`}>{a.label}</span>
+              {showName && <span className="font-medium text-slate-800">{e.indicator_name || (e.entity_type === "indicator" ? `指标 #${e.entity_id}` : `#${e.entity_id}`)}</span>}
+              <span className="text-xs text-slate-400">{fmtTime(e.created_at)}</span>
+            </div>
+            <div className="mt-1 text-xs text-slate-500">操作人：{e.actor_name || "—"}</div>
+            <ChangeLines detail={e.detail} />
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function History_({ guard, flash }) {
+  const [rows, setRows] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const load = () => guard(async () => { setBusy(true); try { setRows(await api.getHistory({ limit: 300 })); } finally { setBusy(false); } });
+  useEffect(() => { load(); }, []);
+  return (
+    <div className="max-w-3xl">
+      <div className="mb-4 flex items-center justify-between gap-2">
+        <p className="text-sm text-slate-500">记录全部指标变更：管理员直接增改删，以及采纳 / 驳回的专家建议。</p>
+        <div className="flex shrink-0 gap-2">
+          <Btn size="sm" variant="outline" onClick={() => guard(async () => { await api.exportHistory(); flash("Excel 已开始下载"); })}><FileSpreadsheet size={14} /> 导出 Excel</Btn>
+          <Btn size="sm" variant="outline" onClick={load} disabled={busy}>{busy ? "加载中…" : "刷新"}</Btn>
+        </div>
+      </div>
+      {rows === null ? <p className="text-sm text-slate-400">加载中…</p> : <HistoryList rows={rows} />}
     </div>
   );
 }

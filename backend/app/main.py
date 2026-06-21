@@ -17,12 +17,16 @@ from .routers import auth, users, classifications, indicators, suggestions, comm
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    import time
+    import os, time
     from sqlalchemy.exc import OperationalError
+    reset = os.getenv("RESET_DB", "").lower() in ("1", "true", "yes")
     # 等待数据库就绪再建表（Render 等平台首次部署时数据库可能晚于服务上线）
     last_err = None
     for attempt in range(1, 31):          # 最多约 90 秒
         try:
+            if reset:
+                print("[startup] RESET_DB 已开启：删除并按当前模型重建所有表…", flush=True)
+                Base.metadata.drop_all(bind=engine)
             Base.metadata.create_all(bind=engine)
             last_err = None
             break
@@ -53,6 +57,21 @@ app.add_middleware(
 API = "/api/v1"
 for r in (auth, users, classifications, indicators, suggestions, comments, export, imports, history):
     app.include_router(r.router, prefix=API)
+
+
+import logging as _logging
+import traceback as _traceback
+from fastapi import Request as _Request
+from fastapi.responses import JSONResponse as _JSONResponse
+
+_logger = _logging.getLogger("app")
+
+
+@app.exception_handler(Exception)
+async def _unhandled_error(request: _Request, exc: Exception):
+    """把未捕获异常的堆栈打到日志，并以 JSON 形式返回具体错误信息（便于排查）。"""
+    _logger.error("未处理异常 %s %s\n%s", request.method, request.url.path, _traceback.format_exc())
+    return _JSONResponse(status_code=500, content={"detail": f"服务器内部错误：{type(exc).__name__}: {exc}"})
 
 
 @app.get("/health", tags=["健康检查"])

@@ -36,12 +36,38 @@ async def lifespan(app: FastAPI):
             time.sleep(3)
     if last_err is not None:
         raise last_err
+    _light_migrate()                       # 给已存在的表补充新增列（不丢数据）
     db = SessionLocal()
     try:
         seed(db)
     finally:
         db.close()
     yield
+
+
+def _light_migrate():
+    """增量迁移：为已存在的 indicators 表补充模型新增的列（不删表、不丢数据）。
+    create_all 不会修改已存在的表，因此这里用 ALTER TABLE 补列并回填默认值。"""
+    from sqlalchemy import inspect, text
+    insp = inspect(engine)
+    if not insp.has_table("indicators"):
+        return
+    existing = {c["name"] for c in insp.get_columns("indicators")}
+    json_type = "JSON" if engine.dialect.name != "sqlite" else "TEXT"
+    additions = [("stratification", "TEXT"), ("source_other", "VARCHAR(512)"), ("source_tags", json_type)]
+    added = []
+    for name, coltype in additions:
+        if name not in existing:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE indicators ADD COLUMN {name} {coltype}"))
+            added.append(name)
+    if added:
+        # 回填默认值，避免旧行为 NULL 导致序列化报错
+        with engine.begin() as conn:
+            conn.execute(text("UPDATE indicators SET stratification='' WHERE stratification IS NULL"))
+            conn.execute(text("UPDATE indicators SET source_other='' WHERE source_other IS NULL"))
+            conn.execute(text("UPDATE indicators SET source_tags='[]' WHERE source_tags IS NULL"))
+        print(f"[migrate] indicators 已补充列：{', '.join(added)}", flush=True)
 
 
 app = FastAPI(title="健康指标标准修订协作平台 API", version="1.0.0", lifespan=lifespan)

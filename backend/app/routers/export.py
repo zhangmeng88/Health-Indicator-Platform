@@ -13,7 +13,18 @@ router = APIRouter(prefix="/export", tags=["导出"])
 
 LEVELS = ["一级分类", "二级分类", "三级分类"]
 HEADERS = ["来源标准/部分", *LEVELS, "标识符", "中文名称", "英文名称", "计量单位",
-           "定义", "计算方法", "指标说明", "调查方法", "数据来源", "发布频率"]
+           "定义", "计算方法", "指标说明", "调查方法", "数据来源", "发布频率",
+           "分层统计", "来源标签"]
+
+
+def source_tags_str(ind):
+    parts = []
+    for t in (ind.source_tags or []):
+        if t == "其他" and (ind.source_other or "").strip():
+            parts.append(f"其他（{ind.source_other.strip()}）")
+        else:
+            parts.append(t)
+    return "、".join(parts)
 
 
 def _walk(db: Session, parent_id=None, path=None):
@@ -57,6 +68,7 @@ def export_excel(admin: User = Depends(require_admin), db: Session = Depends(get
                 ind.identifier, ind.name_cn, ind.name_en, ind.unit,
                 ind.definition, ind.method, ind.description,
                 ind.survey_method, ind.data_source, ind.frequency,
+                ind.stratification, source_tags_str(ind),
             ])
             r = ws.max_row
             for c in range(1, len(HEADERS) + 1):
@@ -65,7 +77,7 @@ def export_excel(admin: User = Depends(require_admin), db: Session = Depends(get
                 cc.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
                 cc.border = border
 
-    widths = [28, 12, 12, 12, 14, 22, 30, 8, 40, 32, 40, 10, 16, 10]
+    widths = [28, 12, 12, 12, 14, 22, 30, 8, 40, 32, 40, 10, 16, 10, 30, 24]
     from openpyxl.utils import get_column_letter
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
@@ -95,6 +107,8 @@ def export_word(admin: User = Depends(require_admin), db: Session = Depends(get_
         ("调查方法", lambda i: i.survey_method),
         ("数据来源", lambda i: i.data_source),
         ("发布频率", lambda i: i.frequency),
+        ("分层统计", lambda i: i.stratification),
+        ("来源标签", lambda i: source_tags_str(i)),
     ]
 
     def style_run(run, size=10.5, bold=False, color=None):

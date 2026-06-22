@@ -20,10 +20,12 @@ const META_FIELDS = [
   { key: "description",  label: "指标说明", long: true, span2: true },
   { key: "survey_method",label: "调查方法" },
   { key: "data_source",  label: "数据来源" },
+  { key: "stratification", label: "分层统计", long: true, span2: true },
 ];
-const DETAIL_ORDER = ["source_standard_id","identifier","name_en","unit","definition","method","description","survey_method","data_source","frequency"];
-const FIELD_LABEL = { ...Object.fromEntries(META_FIELDS.map((f) => [f.key, f.label])), classification_id: "所属分类" };
-const TEXT_KEYS = ["identifier","name_cn","name_en","unit","definition","method","description","survey_method","data_source","frequency"];
+const SOURCE_TAGS = ["Global Reference List of Health Indicators", "Global Health Observatory", "World Bank", "OECD", "其他"];
+const DETAIL_ORDER = ["source_standard_id","identifier","name_en","unit","definition","method","description","survey_method","data_source","frequency","stratification"];
+const FIELD_LABEL = { ...Object.fromEntries(META_FIELDS.map((f) => [f.key, f.label])), classification_id: "所属分类", source_tags: "来源标签", source_other: "来源（其他）" };
+const TEXT_KEYS = ["identifier","name_cn","name_en","unit","definition","method","description","survey_method","data_source","frequency","stratification","source_other"];
 const LEVEL_NAME = ["一级分类", "二级分类", "三级分类"];
 
 const PRIORITY = {
@@ -267,13 +269,45 @@ function Browse(ctx) {
             <Btn size="sm" onClick={() => setModal({ type: "add" })}><Plus size={15} /> {user.role === "admin" ? "新增指标" : "建议新增"}</Btn>
           </div>
         </div>
-        <div className="space-y-2">
+        <div className="space-y-1">
           {filtered.length === 0 && <Empty icon={BookOpen} text="未找到匹配的指标" />}
-          {filtered.map((i) => { const path = findPath(hierarchy, i.classification_id); return (
-            <button key={i.id} onClick={() => setSelId(i.id)} className={`w-full rounded-lg border px-3.5 py-3 text-left transition-colors ${selId === i.id ? "border-teal-500 bg-teal-50" : "border-slate-200 bg-white hover:border-teal-300"}`}>
-              <div className="text-sm font-medium text-slate-800">{i.name_cn}</div>
-              <div className="mt-1 flex items-center gap-2 text-xs text-slate-500"><span className="font-mono">{i.identifier}</span>{path && <span>· {path.join(" › ")}</span>}</div>
-            </button>); })}
+          {filtered.length > 0 && (() => {
+            const byClass = {};
+            filtered.forEach((i) => { const k = i.classification_id ?? 0; (byClass[k] = byClass[k] || []).push(i); });
+            const renderRow = (i) => (
+              <button key={i.id} onClick={() => setSelId(i.id)} className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${selId === i.id ? "border-teal-500 bg-teal-50" : "border-slate-200 bg-white hover:border-teal-300"}`}>
+                <div className="text-sm font-medium text-slate-800">{i.name_cn}</div>
+                <div className="mt-0.5 font-mono text-xs text-slate-500">{i.identifier || "—"}</div>
+              </button>
+            );
+            const renderNode = (node, depth) => {
+              const own = byClass[node.id] || [];
+              const kids = (node.children || []).map((c) => renderNode(c, depth + 1)).filter(Boolean);
+              if (own.length === 0 && kids.length === 0) return null;
+              const total = subtreeIds(node).reduce((s, id) => s + (byClass[id]?.length || 0), 0);
+              return (
+                <div key={node.id} className="mt-2">
+                  <div className="flex items-center gap-1.5 py-1 text-xs font-semibold text-slate-600" style={{ paddingLeft: depth * 12 }}>
+                    <Layers size={12} className="text-teal-500" />{node.name}
+                    <span className="font-normal text-slate-400">（{total}）</span>
+                  </div>
+                  {own.length > 0 && <div className="space-y-1.5" style={{ paddingLeft: depth * 12 + 14 }}>{own.map(renderRow)}</div>}
+                  {kids}
+                </div>
+              );
+            };
+            const top = hierarchy.map((n) => renderNode(n, 0)).filter(Boolean);
+            const unc = byClass[0] || [];
+            return (<>
+              {top}
+              {unc.length > 0 && (
+                <div className="mt-2">
+                  <div className="py-1 text-xs font-semibold text-slate-600">未分类（{unc.length}）</div>
+                  <div className="space-y-1.5 pl-3.5">{unc.map(renderRow)}</div>
+                </div>
+              )}
+            </>);
+          })()}
         </div>
         <p className="mt-3 text-xs text-slate-400">共 {filtered.length} / {indicators.length} 项</p>
       </div>
@@ -312,6 +346,16 @@ function IndicatorDetail({ indicator, ctx, onEdit, onDelete }) {
           {DETAIL_ORDER.map((k) => (<div key={k} className="grid grid-cols-4 gap-3 py-2">
             <dt className="text-xs font-medium text-slate-500">{FIELD_LABEL[k]}</dt>
             <dd className="col-span-3 text-sm text-slate-700">{disp(k) || <span className="text-slate-300">—</span>}</dd></div>))}
+          {indicator.source_tags?.length > 0 && (
+            <div className="grid grid-cols-4 gap-3 py-2">
+              <dt className="text-xs font-medium text-slate-500">来源标签</dt>
+              <dd className="col-span-3 flex flex-wrap gap-1.5">
+                {indicator.source_tags.map((t) => (
+                  <span key={t} className="rounded bg-teal-50 px-2 py-0.5 text-xs text-teal-700">{t === "其他" && indicator.source_other ? `其他（${indicator.source_other}）` : t}</span>
+                ))}
+              </dd>
+            </div>
+          )}
         </dl>
         {user.role === "expert" && <p className="mt-3 flex items-center gap-1.5 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700"><AlertCircle size={13} /> 您的修改与删除将作为建议提交，经管理员审核后方可生效。</p>}
       </div>
@@ -346,20 +390,24 @@ function IndicatorForm({ mode, indicator, ctx, onClose }) {
   const flat = useMemo(() => flatten(hierarchy), [hierarchy]);
   const blank = Object.fromEntries(META_FIELDS.map((f) => [f.key, ""]));
   const [form, setForm] = useState(() => mode === "edit"
-    ? { ...blank, ...Object.fromEntries(META_FIELDS.map((f) => [f.key, indicator[f.key] ?? ""])), classification_id: indicator.classification_id ?? "" }
-    : { ...blank, classification_id: flat.find((f) => !f.hasChildren)?.id || flat[0]?.id || "", priority: "high" });
+    ? { ...blank, ...Object.fromEntries(META_FIELDS.map((f) => [f.key, indicator[f.key] ?? ""])), classification_id: indicator.classification_id ?? "", source_tags: indicator.source_tags || [], source_other: indicator.source_other || "" }
+    : { ...blank, classification_id: flat.find((f) => !f.hasChildren)?.id || flat[0]?.id || "", priority: "high", source_tags: [], source_other: "" });
   const [rationale, setRationale] = useState(""); const [busy, setBusy] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const toggleTag = (t) => setForm((f) => ({ ...f, source_tags: f.source_tags.includes(t) ? f.source_tags.filter((x) => x !== t) : [...f.source_tags, t] }));
   const numOrNull = (v) => (v === "" || v === null || v === undefined ? null : Number(v));
 
   const submit = () => guard(async () => {
     if (!String(form.name_cn).trim()) return flash("请填写中文名称");
+    if (form.source_tags.includes("其他") && !String(form.source_other).trim()) return flash("选择“其他”来源标签时，请填写具体来源");
     setBusy(true);
     try {
       if (mode === "add") {
         const payload = {};
         META_FIELDS.forEach((f) => { payload[f.key] = f.key === "source_standard_id" ? numOrNull(form[f.key]) : (form[f.key] || ""); });
         payload.classification_id = numOrNull(form.classification_id);
+        payload.source_tags = form.source_tags;
+        payload.source_other = form.source_other || "";
         if (isAdmin) {
           await api.createIndicator(payload);
           await reloadIndicators();
@@ -374,6 +422,8 @@ function IndicatorForm({ mode, indicator, ctx, onClose }) {
         TEXT_KEYS.forEach((k) => { if ((form[k] || "") !== (indicator[k] || "")) changes[k] = form[k]; });
         if (numOrNull(form.source_standard_id) !== (indicator.source_standard_id ?? null)) changes.source_standard_id = numOrNull(form.source_standard_id);
         if (numOrNull(form.classification_id) !== (indicator.classification_id ?? null)) changes.classification_id = numOrNull(form.classification_id);
+        if (JSON.stringify(form.source_tags) !== JSON.stringify(indicator.source_tags || [])) changes.source_tags = form.source_tags;
+        if ((form.source_other || "") !== (indicator.source_other || "")) changes.source_other = form.source_other || "";
         if (Object.keys(changes).length === 0) { setBusy(false); return flash("未检测到任何修改"); }
         if (isAdmin) {
           await api.updateIndicator(indicator.id, changes);
@@ -415,6 +465,17 @@ function IndicatorForm({ mode, indicator, ctx, onClose }) {
             <option value="">（未指定）</option>
             {flat.map((f) => <option key={f.id} value={f.id}>{"　".repeat(f.depth) + f.name}</option>)}
           </select>
+        </Field>
+        <Field label="来源标签（可多选）" span2>
+          <div className="flex flex-wrap gap-2">
+            {SOURCE_TAGS.map((t) => {
+              const on = form.source_tags.includes(t);
+              return <button key={t} type="button" onClick={() => toggleTag(t)} className={`rounded-md border px-2.5 py-1.5 text-xs transition-colors ${on ? "border-teal-400 bg-teal-50 text-teal-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{on ? "✓ " : ""}{t}</button>;
+            })}
+          </div>
+          {form.source_tags.includes("其他") && (
+            <input className={inputCls + " mt-2"} value={form.source_other} onChange={(e) => set("source_other", e.target.value)} placeholder="请填写具体来源 *" />
+          )}
         </Field>
         {!isAdmin && mode === "add" && (
           <Field label="推荐优先级 *" span2>

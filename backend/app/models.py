@@ -98,6 +98,9 @@ class Indicator(Base):
     survey_method = Column(String(128), default="")# 调查方法
     data_source = Column(String(255), default="")  # 数据来源
     frequency = Column(String(64), default="")     # 发布频率
+    stratification = Column(Text, default="")      # 分层统计
+    source_tags = Column(JSON, default=list)       # 来源标签（多选）
+    source_other = Column(String(512), default="") # 来源标签为“其他”时的具体来源
 
     status = Column(Enum(IndicatorStatus), nullable=False, default=IndicatorStatus.active, index=True)
     version = Column(Integer, nullable=False, default=1)

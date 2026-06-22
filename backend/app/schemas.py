@@ -1,7 +1,7 @@
 """Pydantic 模型（请求体 / 响应体）。"""
 from datetime import datetime
 from typing import Optional, Any
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from .models import Role, SuggestionType, SuggestionStatus, Priority, IndicatorStatus
 
@@ -79,8 +79,23 @@ class IndicatorBase(BaseModel):
     survey_method: str = ""
     data_source: str = ""
     frequency: str = ""
+    stratification: str = ""
+    source_tags: list[str] = []
+    source_other: str = ""
     classification_id: Optional[int] = None
     source_standard_id: Optional[int] = None
+
+    @field_validator("identifier", "name_en", "unit", "definition", "method", "description",
+                     "survey_method", "data_source", "frequency", "stratification", "source_other",
+                     mode="before")
+    @classmethod
+    def _none_to_empty(cls, v):
+        return "" if v is None else v
+
+    @field_validator("source_tags", mode="before")
+    @classmethod
+    def _none_to_list(cls, v):
+        return [] if v is None else v
 
 
 class IndicatorCreate(IndicatorBase):
@@ -98,6 +113,9 @@ class IndicatorUpdate(BaseModel):
     survey_method: Optional[str] = None
     data_source: Optional[str] = None
     frequency: Optional[str] = None
+    stratification: Optional[str] = None
+    source_tags: Optional[list[str]] = None
+    source_other: Optional[str] = None
     classification_id: Optional[int] = None
     source_standard_id: Optional[int] = None
 

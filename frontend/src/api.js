@@ -79,6 +79,8 @@ export const api = {
   createClassification: (body) => request("/classifications", { method: "POST", body }),
   updateClassification: (id, body) => request(`/classifications/${id}`, { method: "PATCH", body }),
   deleteClassification: (id) => request(`/classifications/${id}`, { method: "DELETE" }),
+  reorderClassifications: (ordered_ids) => request("/classifications/reorder", { method: "POST", body: { ordered_ids } }),
+  reorderIndicators: (ordered_ids) => request("/indicators/reorder", { method: "POST", body: { ordered_ids } }),
 
   // 来源标准
   getSources: () => request("/source-standards"),
@@ -125,6 +127,14 @@ export const api = {
   // 导出
   exportExcel: () => download("/export/excel", "卫生统计指标.xlsx"),
   exportWord: () => download("/export/word", "卫生统计指标.docx"),
+
+  // 版本管理（最终成果快照）
+  getVersions: () => request("/versions"),
+  createVersion: (body) => request("/versions", { method: "POST", body }),
+  getVersion: (id) => request(`/versions/${id}`),
+  deleteVersion: (id) => request(`/versions/${id}`, { method: "DELETE" }),
+  exportVersionExcel: (id, label) => download(`/versions/${id}/export/excel`, `${label || "指标版本"}.xlsx`),
+  exportVersionWord: (id, label) => download(`/versions/${id}/export/word`, `${label || "指标版本"}.docx`),
 
   // 上传导入（管理员）：上传主表 xlsx 批量导入
   importStandard: async (file, update = false) => {

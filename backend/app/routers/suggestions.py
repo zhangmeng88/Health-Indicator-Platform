@@ -20,7 +20,7 @@ router = APIRouter(prefix="/suggestions", tags=["建议审核"])
 # 允许通过建议写入指标的字段白名单
 INDICATOR_FIELDS = {"identifier", "name_cn", "name_en", "unit", "definition", "method",
                     "description", "survey_method", "data_source", "frequency",
-                    "stratification", "source_tags", "source_other",
+                    "stratification", "source_tags", "source_other", "indicator_type",
                     "classification_id", "source_standard_id"}
 
 

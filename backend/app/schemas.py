@@ -39,6 +39,10 @@ class PasswordReset(BaseModel):
 
 
 # ---------- Classification ----------
+class ReorderBody(BaseModel):
+    ordered_ids: list[int]
+
+
 class ClassificationCreate(BaseModel):
     name: str
     parent_id: Optional[int] = None
@@ -82,12 +86,13 @@ class IndicatorBase(BaseModel):
     stratification: str = ""
     source_tags: list[str] = []
     source_other: str = ""
+    indicator_type: str = ""
     classification_id: Optional[int] = None
     source_standard_id: Optional[int] = None
 
     @field_validator("identifier", "name_en", "unit", "definition", "method", "description",
                      "survey_method", "data_source", "frequency", "stratification", "source_other",
-                     mode="before")
+                     "indicator_type", mode="before")
     @classmethod
     def _none_to_empty(cls, v):
         return "" if v is None else v
@@ -116,6 +121,7 @@ class IndicatorUpdate(BaseModel):
     stratification: Optional[str] = None
     source_tags: Optional[list[str]] = None
     source_other: Optional[str] = None
+    indicator_type: Optional[str] = None
     classification_id: Optional[int] = None
     source_standard_id: Optional[int] = None
 
@@ -191,3 +197,18 @@ class CommentOut(BaseModel):
 
 
 ClassificationNode.model_rebuild()
+
+
+class VersionCreate(BaseModel):
+    label: str
+    note: str = ""
+
+
+class VersionOut(BaseModel):
+    id: int
+    label: str
+    note: str = ""
+    indicator_count: int = 0
+    creator_name: Optional[str] = None
+    created_at: Optional[datetime] = None
+    model_config = ConfigDict(from_attributes=True)

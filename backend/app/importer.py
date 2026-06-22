@@ -79,6 +79,7 @@ def run_import(db: Session, source, update: bool = False, sheet: str | None = No
     scache, ccache = {}, {}
     inserted = updated = skipped = 0
     strat_idx = header.index("分层统计") if "分层统计" in header else None
+    type_idx = header.index("指标类型") if "指标类型" in header else None
 
     for raw in rows:
         if not raw or not _norm(raw[idx["name_cn"]]):
@@ -93,6 +94,7 @@ def run_import(db: Session, source, update: bool = False, sheet: str | None = No
             description=g("description"), survey_method=g("survey_method"),
             data_source=g("data_source"), frequency=g("frequency"),
             stratification=(_norm(raw[strat_idx]) if strat_idx is not None else ""),
+            indicator_type=(_norm(raw[type_idx]) if type_idx is not None else ""),
             classification_id=class_id,
             source_standard_id=source_obj.id if source_obj else None,
         )

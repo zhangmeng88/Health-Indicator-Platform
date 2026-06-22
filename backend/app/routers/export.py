@@ -14,7 +14,7 @@ router = APIRouter(prefix="/export", tags=["导出"])
 LEVELS = ["一级分类", "二级分类", "三级分类"]
 HEADERS = ["来源标准/部分", *LEVELS, "标识符", "中文名称", "英文名称", "计量单位",
            "定义", "计算方法", "指标说明", "调查方法", "数据来源", "发布频率",
-           "分层统计", "来源标签"]
+           "分层统计", "来源标签", "指标类型"]
 
 
 def source_tags_str(ind):
@@ -41,7 +41,7 @@ def _walk(db: Session, parent_id=None, path=None):
 def _indicators(db: Session, class_id: int):
     return (db.query(Indicator)
             .filter(Indicator.classification_id == class_id, Indicator.status == IndicatorStatus.active)
-            .order_by(Indicator.identifier).all())
+            .order_by(Indicator.sort_order, Indicator.identifier).all())
 
 
 @router.get("/excel", summary="导出 Excel")
@@ -68,7 +68,7 @@ def export_excel(admin: User = Depends(require_admin), db: Session = Depends(get
                 ind.identifier, ind.name_cn, ind.name_en, ind.unit,
                 ind.definition, ind.method, ind.description,
                 ind.survey_method, ind.data_source, ind.frequency,
-                ind.stratification, source_tags_str(ind),
+                ind.stratification, source_tags_str(ind), ind.indicator_type,
             ])
             r = ws.max_row
             for c in range(1, len(HEADERS) + 1):
@@ -77,7 +77,7 @@ def export_excel(admin: User = Depends(require_admin), db: Session = Depends(get
                 cc.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
                 cc.border = border
 
-    widths = [28, 12, 12, 12, 14, 22, 30, 8, 40, 32, 40, 10, 16, 10, 30, 24]
+    widths = [28, 12, 12, 12, 14, 22, 30, 8, 40, 32, 40, 10, 16, 10, 30, 24, 12]
     from openpyxl.utils import get_column_letter
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
@@ -109,6 +109,7 @@ def export_word(admin: User = Depends(require_admin), db: Session = Depends(get_
         ("发布频率", lambda i: i.frequency),
         ("分层统计", lambda i: i.stratification),
         ("来源标签", lambda i: source_tags_str(i)),
+        ("指标类型", lambda i: i.indicator_type),
     ]
 
     def style_run(run, size=10.5, bold=False, color=None):

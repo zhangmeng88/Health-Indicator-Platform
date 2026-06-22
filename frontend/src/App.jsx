@@ -3,7 +3,7 @@ import {
   LogIn, LogOut, RefreshCw, Users, ListTree, ClipboardCheck, Download,
   Search, Plus, Pencil, Trash2, MessageSquare, Check, X, ChevronRight,
   ChevronDown, KeyRound, ShieldCheck, FileText, FileSpreadsheet,
-  AlertCircle, Layers, BookOpen, Clock, UserPlus, Star, Upload, History
+  AlertCircle, Layers, BookOpen, Clock, UserPlus, Star, Upload, History, Move, ArrowUp, ArrowDown, GripVertical, GitBranch
 } from "lucide-react";
 import { api, tokenStore, setUnauthorizedHandler } from "./api";
 
@@ -23,9 +23,10 @@ const META_FIELDS = [
   { key: "stratification", label: "分层统计", long: true, span2: true },
 ];
 const SOURCE_TAGS = ["Global Reference List of Health Indicators", "Global Health Observatory", "World Bank", "OECD", "其他"];
-const DETAIL_ORDER = ["source_standard_id","identifier","name_en","unit","definition","method","description","survey_method","data_source","frequency","stratification"];
-const FIELD_LABEL = { ...Object.fromEntries(META_FIELDS.map((f) => [f.key, f.label])), classification_id: "所属分类", source_tags: "来源标签", source_other: "来源（其他）" };
-const TEXT_KEYS = ["identifier","name_cn","name_en","unit","definition","method","description","survey_method","data_source","frequency","stratification","source_other"];
+const INDICATOR_TYPES = ["核心指标", "备选指标"];
+const DETAIL_ORDER = ["source_standard_id","identifier","indicator_type","name_en","unit","definition","method","description","survey_method","data_source","frequency","stratification"];
+const FIELD_LABEL = { ...Object.fromEntries(META_FIELDS.map((f) => [f.key, f.label])), classification_id: "所属分类", source_tags: "来源标签", source_other: "来源（其他）", indicator_type: "指标类型" };
+const TEXT_KEYS = ["identifier","name_cn","name_en","unit","definition","method","description","survey_method","data_source","frequency","stratification","source_other","indicator_type"];
 const LEVEL_NAME = ["一级分类", "二级分类", "三级分类"];
 
 const PRIORITY = {
@@ -165,6 +166,7 @@ export default function App() {
     { id: "hierarchy", label: "分类层级", icon: ListTree },
     { id: "accounts", label: "专家账户", icon: Users },
     { id: "history", label: "修改历史", icon: History },
+    { id: "versions", label: "版本管理", icon: GitBranch },
     { id: "export", label: "导入 / 导出", icon: Download },
   ];
   const expertTabs = [
@@ -204,6 +206,7 @@ export default function App() {
           {tab === "hierarchy" && <Hierarchy {...ctx} />}
           {tab === "accounts" && <Accounts {...ctx} />}
           {tab === "history" && <History_ {...ctx} />}
+          {tab === "versions" && <Versions {...ctx} />}
           {tab === "export" && <Export {...ctx} />}
           {tab === "mine" && <MySuggestions {...ctx} />}
         </div>
@@ -239,10 +242,23 @@ function Login({ onLogin, toast }) {
 
 /* -------------------- 指标浏览与编辑 -------------------- */
 function Browse(ctx) {
-  const { hierarchy, sources, indicators, user } = ctx;
+  const { hierarchy, sources, indicators, user, guard, flash, reloadIndicators } = ctx;
   const [q, setQ] = useState(""); const [classFilter, setClassFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
   const [selId, setSelId] = useState(null); const [modal, setModal] = useState(null);
   const flat = useMemo(() => flatten(hierarchy), [hierarchy]);
+  const byClassFull = useMemo(() => {
+    const m = {};   // indicators 已由后端按 (sort_order, identifier) 排好序，保持其顺序
+    indicators.forEach((i) => { const k = i.classification_id ?? 0; (m[k] = m[k] || []).push(i); });
+    return m;
+  }, [indicators]);
+  const moveIndicator = (i, dir) => guard(async () => {
+    const sibs = byClassFull[i.classification_id ?? 0] || [];
+    const idx = sibs.findIndex((s) => s.id === i.id); const to = idx + dir;
+    if (idx < 0 || to < 0 || to >= sibs.length) return;
+    const ids = sibs.map((s) => s.id); const [m] = ids.splice(idx, 1); ids.splice(to, 0, m);
+    await api.reorderIndicators(ids); await reloadIndicators(); flash("已调整指标顺序（导出将按此顺序）");
+  });
   const filterIds = useMemo(() => {
     if (classFilter === "all") return null;
     const node = findNode(hierarchy, Number(classFilter));
@@ -251,7 +267,8 @@ function Browse(ctx) {
   const filtered = indicators.filter((i) => {
     const okQ = !q || (i.name_cn || "").includes(q) || (i.identifier || "").toLowerCase().includes(q.toLowerCase());
     const okC = !filterIds || filterIds.has(i.classification_id);
-    return okQ && okC;
+    const okT = typeFilter === "all" || (i.indicator_type || "") === typeFilter;
+    return okQ && okC && okT;
   });
   const sel = indicators.find((i) => i.id === selId) || null;
 
@@ -266,6 +283,10 @@ function Browse(ctx) {
               <option value="all">全部分类</option>
               {flat.map((f) => <option key={f.id} value={f.id}>{"　".repeat(f.depth) + f.name}</option>)}
             </select>
+            <select className={`${inputCls} max-w-[8rem]`} value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+              <option value="all">全部类型</option>
+              {INDICATOR_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
             <Btn size="sm" onClick={() => setModal({ type: "add" })}><Plus size={15} /> {user.role === "admin" ? "新增指标" : "建议新增"}</Btn>
           </div>
         </div>
@@ -274,12 +295,28 @@ function Browse(ctx) {
           {filtered.length > 0 && (() => {
             const byClass = {};
             filtered.forEach((i) => { const k = i.classification_id ?? 0; (byClass[k] = byClass[k] || []).push(i); });
-            const renderRow = (i) => (
-              <button key={i.id} onClick={() => setSelId(i.id)} className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${selId === i.id ? "border-teal-500 bg-teal-50" : "border-slate-200 bg-white hover:border-teal-300"}`}>
-                <div className="text-sm font-medium text-slate-800">{i.name_cn}</div>
-                <div className="mt-0.5 font-mono text-xs text-slate-500">{i.identifier || "—"}</div>
-              </button>
-            );
+            const renderRow = (i, sibs) => {
+              const idx = sibs.findIndex((s) => s.id === i.id);
+              const showSort = user.role === "admin" && !q;
+              return (
+                <div key={i.id} className={`flex items-center gap-1 rounded-lg border px-2 py-1.5 transition-colors ${selId === i.id ? "border-teal-500 bg-teal-50" : "border-slate-200 bg-white hover:border-teal-300"}`}>
+                  <button onClick={() => setSelId(i.id)} className="min-w-0 flex-1 text-left">
+                    <div className="flex items-center gap-1.5">
+                      {i.indicator_type === "核心指标" && <span className="shrink-0 rounded bg-teal-100 px-1 text-[10px] font-medium text-teal-700">核心</span>}
+                      {i.indicator_type === "备选指标" && <span className="shrink-0 rounded bg-amber-100 px-1 text-[10px] font-medium text-amber-700">备选</span>}
+                      <span className="truncate text-sm font-medium text-slate-800">{i.name_cn}</span>
+                    </div>
+                    <div className="mt-0.5 font-mono text-xs text-slate-500">{i.identifier || "—"}</div>
+                  </button>
+                  {showSort && (
+                    <div className="flex flex-col">
+                      <button disabled={idx <= 0} onClick={() => moveIndicator(i, -1)} title="上移" className="rounded p-0.5 text-slate-400 hover:bg-slate-200 disabled:opacity-25 disabled:hover:bg-transparent"><ArrowUp size={12} /></button>
+                      <button disabled={idx < 0 || idx >= sibs.length - 1} onClick={() => moveIndicator(i, 1)} title="下移" className="rounded p-0.5 text-slate-400 hover:bg-slate-200 disabled:opacity-25 disabled:hover:bg-transparent"><ArrowDown size={12} /></button>
+                    </div>
+                  )}
+                </div>
+              );
+            };
             const renderNode = (node, depth) => {
               const own = byClass[node.id] || [];
               const kids = (node.children || []).map((c) => renderNode(c, depth + 1)).filter(Boolean);
@@ -291,7 +328,7 @@ function Browse(ctx) {
                     <Layers size={12} className="text-teal-500" />{node.name}
                     <span className="font-normal text-slate-400">（{total}）</span>
                   </div>
-                  {own.length > 0 && <div className="space-y-1.5" style={{ paddingLeft: depth * 12 + 14 }}>{own.map(renderRow)}</div>}
+                  {own.length > 0 && <div className="space-y-1.5" style={{ paddingLeft: depth * 12 + 14 }}>{own.map((i) => renderRow(i, byClassFull[node.id] || []))}</div>}
                   {kids}
                 </div>
               );
@@ -303,7 +340,7 @@ function Browse(ctx) {
               {unc.length > 0 && (
                 <div className="mt-2">
                   <div className="py-1 text-xs font-semibold text-slate-600">未分类（{unc.length}）</div>
-                  <div className="space-y-1.5 pl-3.5">{unc.map(renderRow)}</div>
+                  <div className="space-y-1.5 pl-3.5">{unc.map((i) => renderRow(i, byClassFull[0] || []))}</div>
                 </div>
               )}
             </>);
@@ -390,8 +427,8 @@ function IndicatorForm({ mode, indicator, ctx, onClose }) {
   const flat = useMemo(() => flatten(hierarchy), [hierarchy]);
   const blank = Object.fromEntries(META_FIELDS.map((f) => [f.key, ""]));
   const [form, setForm] = useState(() => mode === "edit"
-    ? { ...blank, ...Object.fromEntries(META_FIELDS.map((f) => [f.key, indicator[f.key] ?? ""])), classification_id: indicator.classification_id ?? "", source_tags: indicator.source_tags || [], source_other: indicator.source_other || "" }
-    : { ...blank, classification_id: flat.find((f) => !f.hasChildren)?.id || flat[0]?.id || "", priority: "high", source_tags: [], source_other: "" });
+    ? { ...blank, ...Object.fromEntries(META_FIELDS.map((f) => [f.key, indicator[f.key] ?? ""])), classification_id: indicator.classification_id ?? "", source_tags: indicator.source_tags || [], source_other: indicator.source_other || "", indicator_type: indicator.indicator_type || "" }
+    : { ...blank, classification_id: flat.find((f) => !f.hasChildren)?.id || flat[0]?.id || "", priority: "high", source_tags: [], source_other: "", indicator_type: "核心指标" });
   const [rationale, setRationale] = useState(""); const [busy, setBusy] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const toggleTag = (t) => setForm((f) => ({ ...f, source_tags: f.source_tags.includes(t) ? f.source_tags.filter((x) => x !== t) : [...f.source_tags, t] }));
@@ -408,6 +445,7 @@ function IndicatorForm({ mode, indicator, ctx, onClose }) {
         payload.classification_id = numOrNull(form.classification_id);
         payload.source_tags = form.source_tags;
         payload.source_other = form.source_other || "";
+        payload.indicator_type = form.indicator_type || "";
         if (isAdmin) {
           await api.createIndicator(payload);
           await reloadIndicators();
@@ -465,6 +503,15 @@ function IndicatorForm({ mode, indicator, ctx, onClose }) {
             <option value="">（未指定）</option>
             {flat.map((f) => <option key={f.id} value={f.id}>{"　".repeat(f.depth) + f.name}</option>)}
           </select>
+        </Field>
+        <Field label="指标类型" span2>
+          <div className="flex gap-2">
+            {INDICATOR_TYPES.map((t) => {
+              const on = form.indicator_type === t;
+              return <button key={t} type="button" onClick={() => set("indicator_type", t)} className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${on ? "border-teal-500 bg-teal-50 font-medium text-teal-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{on ? "● " : "○ "}{t}</button>;
+            })}
+            {form.indicator_type && <button type="button" onClick={() => set("indicator_type", "")} className="text-xs text-slate-400 hover:text-slate-600">清除</button>}
+          </div>
         </Field>
         <Field label="来源标签（可多选）" span2>
           <div className="flex flex-wrap gap-2">
@@ -632,47 +679,105 @@ function Hierarchy(ctx) {
   const { hierarchy, indicators, flash, guard, reloadHierarchy } = ctx;
   const [expanded, setExpanded] = useState({}); const [adding, setAdding] = useState(null);
   const [name, setName] = useState(""); const [editing, setEditing] = useState(null);
+  const [moving, setMoving] = useState(null);
   const countIn = (id) => indicators.filter((i) => i.classification_id === id).length;
   const doAdd = (pid) => guard(async () => { if (!name.trim()) return flash("请输入分类名称"); await api.createClassification({ name: name.trim(), parent_id: pid }); setName(""); setAdding(null); await reloadHierarchy(); flash("已添加分类"); });
   const doRename = (id) => guard(async () => { if (!name.trim()) return; await api.updateClassification(id, { name: name.trim() }); setEditing(null); setName(""); await reloadHierarchy(); flash("已重命名"); });
   const doRemove = (id) => guard(async () => { await api.deleteClassification(id); await reloadHierarchy(); flash("已删除分类"); });
+  const doMove = (id, val) => guard(async () => { await api.updateClassification(id, { parent_id: val === "" ? null : Number(val) }); setMoving(null); await reloadHierarchy(); flash("已移动分类，级别已自动调整"); });
+  const [dragId, setDragId] = useState(null); const [dragOverId, setDragOverId] = useState(null);
+  const reorderSiblings = (siblings, from, to) => guard(async () => {
+    if (to < 0 || to >= siblings.length) return;
+    const ids = siblings.map((s) => s.id);
+    const [m] = ids.splice(from, 1); ids.splice(to, 0, m);
+    await api.reorderClassifications(ids); await reloadHierarchy();
+  });
+  const dropOnto = (targetId) => {
+    setDragOverId(null);
+    if (dragId == null || dragId === targetId) { setDragId(null); return; }
+    const dragNode = findNode(hierarchy, dragId);
+    if (dragNode && new Set(subtreeIds(dragNode)).has(targetId)) { flash("不能移动到自己的子分类之下"); setDragId(null); return; }
+    const id = dragId; setDragId(null);
+    doMove(id, targetId === null ? "" : String(targetId));
+  };
 
-  const Node = ({ node, depth }) => {
+  const nodeHeight = (n) => (n.children?.length ? 1 + Math.max(...n.children.map(nodeHeight)) : 0);
+  const moveTargets = (node) => {
+    const exclude = new Set(subtreeIds(node));   // 自身 + 全部子孙
+    const h = nodeHeight(node);
+    const opts = [{ id: "", label: "顶级（设为一级分类）" }];
+    flatten(hierarchy).forEach((f) => {
+      if (exclude.has(f.id)) return;
+      const level = f.depth + 1;                  // 目标节点的级别
+      if (level + 1 + h <= 3) opts.push({ id: f.id, label: "　".repeat(f.depth) + `${f.name}（${LEVEL_NAME[f.depth] || "第" + (f.depth + 1) + "级"}）` });
+    });
+    return opts;
+  };
+
+  const Node = ({ node, depth, siblings, index }) => {
     const open = expanded[node.id] ?? depth < 1; const hasKids = node.children?.length > 0;
     return (
       <div>
-        <div className="group flex items-center gap-1 rounded-md px-2 py-1.5 hover:bg-slate-50" style={{ marginLeft: depth * 20 }}>
+        <div
+          draggable={editing !== node.id}
+          onDragStart={(e) => { setDragId(node.id); e.dataTransfer.effectAllowed = "move"; }}
+          onDragEnd={() => { setDragId(null); setDragOverId(null); }}
+          onDragOver={(e) => { e.preventDefault(); if (dragOverId !== node.id) setDragOverId(node.id); }}
+          onDragLeave={() => setDragOverId((d) => (d === node.id ? null : d))}
+          onDrop={(e) => { e.preventDefault(); e.stopPropagation(); dropOnto(node.id); }}
+          className={`group flex items-center gap-1 rounded-md px-2 py-1.5 hover:bg-slate-50 ${dragOverId === node.id ? "ring-2 ring-teal-400 bg-teal-50" : ""} ${dragId === node.id ? "opacity-40" : ""}`}
+          style={{ marginLeft: depth * 20 }}>
+          <GripVertical size={13} className="cursor-grab text-slate-300" title="拖动以移动到其它分类下" />
           <button onClick={() => setExpanded((e) => ({ ...e, [node.id]: !open }))} className="text-slate-400">{hasKids ? (open ? <ChevronDown size={15} /> : <ChevronRight size={15} />) : <span className="inline-block w-[15px]" />}</button>
           <Layers size={14} className="text-teal-600" />
           {editing === node.id ? <input autoFocus className={`${inputCls} max-w-xs py-1`} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && doRename(node.id)} onBlur={() => doRename(node.id)} />
             : <span className="text-sm font-medium text-slate-700">{node.name}</span>}
           <span className="rounded bg-slate-100 px-1.5 text-[11px] text-slate-400">{LEVEL_NAME[depth] || `第${depth + 1}级`}</span>
           <span className="text-xs text-slate-400">{countIn(node.id)} 个指标</span>
-          <div className="ml-auto flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+          <div className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+            <button disabled={index === 0} onClick={() => reorderSiblings(siblings, index, index - 1)} title="上移" className="rounded p-1 text-slate-400 hover:bg-slate-200 disabled:opacity-25 disabled:hover:bg-transparent"><ArrowUp size={13} /></button>
+            <button disabled={index === siblings.length - 1} onClick={() => reorderSiblings(siblings, index, index + 1)} title="下移" className="rounded p-1 text-slate-400 hover:bg-slate-200 disabled:opacity-25 disabled:hover:bg-transparent"><ArrowDown size={13} /></button>
             {depth < 2 && <button onClick={() => { setAdding(node.id); setName(""); }} title="添加子分类" className="rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-teal-700"><Plus size={14} /></button>}
             <button onClick={() => { setEditing(node.id); setName(node.name); }} title="重命名" className="rounded p-1 text-slate-400 hover:bg-slate-200"><Pencil size={13} /></button>
+            <button onClick={() => setMoving(moving === node.id ? null : node.id)} title="移动（改变上下级）" className="rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-teal-700"><Move size={13} /></button>
             <button onClick={() => doRemove(node.id)} title="删除" className="rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-rose-600"><Trash2 size={13} /></button>
           </div>
         </div>
+        {moving === node.id && (
+          <div className="flex items-center gap-2 py-1.5" style={{ marginLeft: depth * 20 + 36 }}>
+            <span className="text-xs text-slate-500">移动到：</span>
+            <select autoFocus className={`${inputCls} max-w-sm py-1`} defaultValue="" onChange={(e) => doMove(node.id, e.target.value)}>
+              <option value="" disabled>选择新的上级…</option>
+              {moveTargets(node).map((o) => <option key={String(o.id)} value={o.id}>{o.label}</option>)}
+            </select>
+            <Btn size="sm" variant="ghost" onClick={() => setMoving(null)}>取消</Btn>
+          </div>
+        )}
         {adding === node.id && (
           <div className="flex items-center gap-2 py-1" style={{ marginLeft: (depth + 1) * 20 + 24 }}>
             <input autoFocus className={`${inputCls} max-w-xs py-1`} placeholder={`新${LEVEL_NAME[depth + 1] || "子分类"}名称`} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && doAdd(node.id)} />
             <Btn size="sm" onClick={() => doAdd(node.id)}>添加</Btn><Btn size="sm" variant="ghost" onClick={() => setAdding(null)}>取消</Btn>
           </div>
         )}
-        {open && hasKids && node.children.map((c) => <Node key={c.id} node={c} depth={depth + 1} />)}
+        {open && hasKids && node.children.map((c, ci) => <Node key={c.id} node={c} depth={depth + 1} siblings={node.children} index={ci} />)}
       </div>
     );
   };
   return (
     <div className="max-w-3xl">
-      <div className="mb-3 flex items-center justify-between"><p className="text-sm text-slate-500">自定义指标分类层级（一级 / 二级 / 三级），导出时按此结构组织。</p><Btn size="sm" onClick={() => { setAdding("root"); setName(""); }}><Plus size={15} /> 新增一级分类</Btn></div>
+      <div className="mb-3 flex items-center justify-between"><p className="text-sm text-slate-500">分类层级（一级/二级/三级）：可改名、增删；<GripVertical size={11} className="inline" /> 拖动节点到另一节点上即成为其子级，<ArrowUp size={11} className="inline" /><ArrowDown size={11} className="inline" /> 调整同级先后顺序（顺序影响导出）。</p><Btn size="sm" onClick={() => { setAdding("root"); setName(""); }}><Plus size={15} /> 新增一级分类</Btn></div>
       {adding === "root" && (
         <div className="mb-2 flex items-center gap-2"><input autoFocus className={`${inputCls} max-w-xs py-1`} placeholder="一级分类名称" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && doAdd(null)} />
           <Btn size="sm" onClick={() => doAdd(null)}>添加</Btn><Btn size="sm" variant="ghost" onClick={() => setAdding(null)}>取消</Btn></div>
       )}
+      {dragId != null && (
+        <div onDragOver={(e) => { e.preventDefault(); setDragOverId("__root__"); }} onDragLeave={() => setDragOverId((d) => (d === "__root__" ? null : d))} onDrop={(e) => { e.preventDefault(); dropOnto(null); }}
+          className={`mb-2 rounded-md border border-dashed px-3 py-2 text-center text-xs ${dragOverId === "__root__" ? "border-teal-400 bg-teal-50 text-teal-700" : "border-slate-300 text-slate-400"}`}>
+          拖到此处 → 提升为一级分类
+        </div>
+      )}
       <div className="rounded-lg border border-slate-200 bg-white p-3">
-        {hierarchy.length === 0 ? <Empty icon={ListTree} text="尚未定义分类层级" /> : hierarchy.map((n) => <Node key={n.id} node={n} depth={0} />)}
+        {hierarchy.length === 0 ? <Empty icon={ListTree} text="尚未定义分类层级" /> : hierarchy.map((n, i) => <Node key={n.id} node={n} depth={0} siblings={hierarchy} index={i} />)}
       </div>
     </div>
   );
@@ -794,6 +899,95 @@ function History_({ guard, flash }) {
         </div>
       </div>
       {rows === null ? <p className="text-sm text-slate-400">加载中…</p> : <HistoryList rows={rows} />}
+    </div>
+  );
+}
+
+/* ------------------------- 版本管理（管理员） ------------------------- */
+function Versions({ guard, flash, indicators }) {
+  const [rows, setRows] = useState(null);
+  const [creating, setCreating] = useState(false);
+  const [label, setLabel] = useState(""); const [note, setNote] = useState("");
+  const [viewing, setViewing] = useState(null); const [busy, setBusy] = useState(false);
+  const load = () => guard(async () => setRows(await api.getVersions()));
+  useEffect(() => { load(); }, []);
+  const create = () => guard(async () => {
+    if (!label.trim()) return flash("请填写版本名称");
+    setBusy(true);
+    try { await api.createVersion({ label: label.trim(), note: note.trim() }); setCreating(false); setLabel(""); setNote(""); await load(); flash("已创建版本快照"); }
+    finally { setBusy(false); }
+  });
+  const remove = (v) => guard(async () => { if (!window.confirm(`确认删除版本「${v.label}」？该操作不可恢复。`)) return; await api.deleteVersion(v.id); await load(); flash("已删除版本"); });
+  const view = (v) => guard(async () => setViewing(await api.getVersion(v.id)));
+  const coreCount = indicators.filter((i) => i.indicator_type === "核心指标").length;
+  const altCount = indicators.filter((i) => i.indicator_type === "备选指标").length;
+
+  return (
+    <div className="max-w-4xl">
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <p className="text-sm text-slate-500">把当前指标池保存为一个<span className="font-medium text-slate-700">定稿版本</span>（快照），便于留存历次报送/发布稿，并可随时按版本导出 Word / Excel。当前共 {indicators.length} 项指标（核心 {coreCount}、备选 {altCount}）。</p>
+        <Btn size="sm" onClick={() => setCreating(true)}><GitBranch size={15} /> 创建新版本</Btn>
+      </div>
+      {rows === null ? <p className="text-sm text-slate-400">加载中…</p> : rows.length === 0 ? (
+        <Empty icon={GitBranch} text="尚未创建任何版本" />
+      ) : (
+        <div className="space-y-2">
+          {rows.map((v) => (
+            <div key={v.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-slate-200 bg-white px-4 py-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2"><span className="font-semibold text-slate-800">{v.label}</span><span className="rounded bg-slate-100 px-1.5 text-xs text-slate-500">{v.indicator_count} 项</span></div>
+                {v.note && <div className="mt-0.5 text-xs text-slate-500">{v.note}</div>}
+                <div className="mt-0.5 text-xs text-slate-400">{v.creator_name || "—"} · {fmtTime(v.created_at)}</div>
+              </div>
+              <div className="flex shrink-0 gap-1.5">
+                <Btn size="sm" variant="outline" onClick={() => view(v)}>查看</Btn>
+                <Btn size="sm" variant="outline" onClick={() => guard(async () => { await api.exportVersionExcel(v.id, v.label); flash("Excel 下载中"); })}><FileSpreadsheet size={14} /> Excel</Btn>
+                <Btn size="sm" variant="outline" onClick={() => guard(async () => { await api.exportVersionWord(v.id, v.label); flash("Word 下载中"); })}><FileText size={14} /> Word</Btn>
+                <Btn size="sm" variant="ghost" onClick={() => remove(v)}><Trash2 size={14} /></Btn>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {creating && (
+        <Modal title="创建新版本" onClose={() => setCreating(false)}>
+          <div className="space-y-3">
+            <div><label className="mb-1 block text-xs font-medium text-slate-500">版本名称 *</label>
+              <input autoFocus className={inputCls} placeholder="如：v1.0 报送稿 / 2026 征求意见稿" value={label} onChange={(e) => setLabel(e.target.value)} /></div>
+            <div><label className="mb-1 block text-xs font-medium text-slate-500">版本说明</label>
+              <textarea className={`${inputCls} h-24`} placeholder="本次定稿的范围、变化说明等" value={note} onChange={(e) => setNote(e.target.value)} /></div>
+            <p className="text-xs text-slate-400">将对当前全部 {indicators.length} 项指标及其分类、顺序打快照保存。</p>
+            <div className="flex justify-end gap-2 pt-1"><Btn variant="ghost" onClick={() => setCreating(false)}>取消</Btn><Btn onClick={create} disabled={busy}>{busy ? "保存中…" : "创建版本"}</Btn></div>
+          </div>
+        </Modal>
+      )}
+
+      {viewing && (
+        <Modal title={`版本：${viewing.label}（${viewing.indicator_count} 项）`} onClose={() => setViewing(null)} wide>
+          <div className="max-h-[60vh] overflow-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="sticky top-0 bg-slate-50 text-slate-500"><tr>
+                <th className="px-2 py-1.5">分类</th><th className="px-2 py-1.5">标识符</th><th className="px-2 py-1.5">中文名称</th><th className="px-2 py-1.5">类型</th>
+              </tr></thead>
+              <tbody>
+                {viewing.indicators.map((r, i) => (
+                  <tr key={i} className="border-t border-slate-100">
+                    <td className="px-2 py-1.5 text-slate-500">{[r.l1, r.l2, r.l3].filter(Boolean).join(" / ")}</td>
+                    <td className="px-2 py-1.5 font-mono text-slate-500">{r.identifier || "—"}</td>
+                    <td className="px-2 py-1.5 text-slate-800">{r.name_cn}</td>
+                    <td className="px-2 py-1.5">{r.indicator_type === "核心指标" ? <span className="rounded bg-teal-100 px-1 text-teal-700">核心</span> : r.indicator_type === "备选指标" ? <span className="rounded bg-amber-100 px-1 text-amber-700">备选</span> : ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-3 flex justify-end gap-2">
+            <Btn size="sm" variant="outline" onClick={() => guard(async () => { await api.exportVersionExcel(viewing.id, viewing.label); flash("Excel 下载中"); })}><FileSpreadsheet size={14} /> 导出 Excel</Btn>
+            <Btn size="sm" variant="outline" onClick={() => guard(async () => { await api.exportVersionWord(viewing.id, viewing.label); flash("Word 下载中"); })}><FileText size={14} /> 导出 Word</Btn>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

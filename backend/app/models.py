@@ -101,9 +101,11 @@ class Indicator(Base):
     stratification = Column(Text, default="")      # 分层统计
     source_tags = Column(JSON, default=list)       # 来源标签（多选）
     source_other = Column(String(512), default="") # 来源标签为“其他”时的具体来源
+    indicator_type = Column(String(16), default="") # 指标类型：核心指标 / 备选指标
 
     status = Column(Enum(IndicatorStatus), nullable=False, default=IndicatorStatus.active, index=True)
     version = Column(Integer, nullable=False, default=1)
+    sort_order = Column(Integer, nullable=False, default=0)   # 同分类内的显示/导出顺序
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
@@ -153,3 +155,16 @@ class AuditLog(Base):
     entity_id = Column(Integer)
     detail = Column(JSON, default=dict)
     created_at = Column(DateTime, server_default=func.now())
+
+
+class OutputVersion(Base):
+    """最终成果版本：对当前指标池打快照，便于留存、对比与导出历次定稿。"""
+    __tablename__ = "output_versions"
+    id = Column(Integer, primary_key=True)
+    label = Column(String(128), nullable=False)        # 版本名称，如 “v1.0 报送稿”
+    note = Column(Text, default="")                    # 版本说明
+    snapshot = Column(JSON, default=dict)              # 指标池快照（含分类路径、全部字段、顺序）
+    indicator_count = Column(Integer, default=0)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    creator = relationship("User")

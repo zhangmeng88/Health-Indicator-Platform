@@ -12,7 +12,7 @@ from .config import settings
 from .database import Base, engine, SessionLocal
 from . import models  # noqa: F401  确保模型被注册
 from .seed import seed
-from .routers import auth, users, classifications, indicators, suggestions, comments, export, imports, history
+from .routers import auth, users, classifications, indicators, suggestions, comments, export, imports, history, versions
 
 
 @asynccontextmanager
@@ -46,28 +46,38 @@ async def lifespan(app: FastAPI):
 
 
 def _light_migrate():
-    """增量迁移：为已存在的 indicators 表补充模型新增的列（不删表、不丢数据）。
+    """增量迁移：为已存在的表补充模型新增的列（不删表、不丢数据）。
     create_all 不会修改已存在的表，因此这里用 ALTER TABLE 补列并回填默认值。"""
     from sqlalchemy import inspect, text
     insp = inspect(engine)
-    if not insp.has_table("indicators"):
-        return
-    existing = {c["name"] for c in insp.get_columns("indicators")}
     json_type = "JSON" if engine.dialect.name != "sqlite" else "TEXT"
-    additions = [("stratification", "TEXT"), ("source_other", "VARCHAR(512)"), ("source_tags", json_type)]
-    added = []
-    for name, coltype in additions:
-        if name not in existing:
-            with engine.begin() as conn:
-                conn.execute(text(f"ALTER TABLE indicators ADD COLUMN {name} {coltype}"))
-            added.append(name)
-    if added:
-        # 回填默认值，避免旧行为 NULL 导致序列化报错
-        with engine.begin() as conn:
-            conn.execute(text("UPDATE indicators SET stratification='' WHERE stratification IS NULL"))
-            conn.execute(text("UPDATE indicators SET source_other='' WHERE source_other IS NULL"))
-            conn.execute(text("UPDATE indicators SET source_tags='[]' WHERE source_tags IS NULL"))
-        print(f"[migrate] indicators 已补充列：{', '.join(added)}", flush=True)
+    # 每项：(列名, DDL类型, NULL回填值SQL或None)
+    spec = {
+        "indicators": [
+            ("stratification", "TEXT", "''"),
+            ("source_other", "VARCHAR(512)", "''"),
+            ("source_tags", json_type, "'[]'"),
+            ("indicator_type", "VARCHAR(16)", "''"),
+            ("sort_order", "INTEGER NOT NULL DEFAULT 0", None),
+        ],
+        "classifications": [
+            ("sort_order", "INTEGER NOT NULL DEFAULT 0", None),
+        ],
+    }
+    for table, cols in spec.items():
+        if not insp.has_table(table):
+            continue
+        existing = {c["name"] for c in insp.get_columns(table)}
+        added = []
+        for name, ddl, backfill in cols:
+            if name not in existing:
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
+                    if backfill is not None:
+                        conn.execute(text(f"UPDATE {table} SET {name} = {backfill} WHERE {name} IS NULL"))
+                added.append(name)
+        if added:
+            print(f"[migrate] {table} 已补充列：{', '.join(added)}", flush=True)
 
 
 app = FastAPI(title="健康指标标准修订协作平台 API", version="1.0.0", lifespan=lifespan)
@@ -81,7 +91,7 @@ app.add_middleware(
 )
 
 API = "/api/v1"
-for r in (auth, users, classifications, indicators, suggestions, comments, export, imports, history):
+for r in (auth, users, classifications, indicators, suggestions, comments, export, imports, history, versions):
     app.include_router(r.router, prefix=API)
 
 

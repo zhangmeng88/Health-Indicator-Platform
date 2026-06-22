@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..security import get_current_user, require_admin
 from ..models import Indicator, IndicatorStatus, SourceStandard, User
-from ..schemas import IndicatorOut, SourceStandardOut, IndicatorCreate, IndicatorUpdate
+from ..schemas import IndicatorOut, SourceStandardOut, IndicatorCreate, IndicatorUpdate, ReorderBody
 from ..utils import indicator_out, audit, change_detail
 
 router = APIRouter(tags=["指标"])
@@ -24,7 +24,17 @@ def list_indicators(
     if q:
         like = f"%{q}%"
         query = query.filter((Indicator.name_cn.like(like)) | (Indicator.identifier.like(like)))
-    return [indicator_out(db, i) for i in query.order_by(Indicator.identifier).all()]
+    return [indicator_out(db, i) for i in query.order_by(Indicator.sort_order, Indicator.identifier).all()]
+
+
+@router.post("/indicators/reorder", summary="调整分类内指标顺序（管理员，影响导出顺序）")
+def reorder_indicators(body: ReorderBody, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    for i, iid in enumerate(body.ordered_ids):
+        ind = db.get(Indicator, iid)
+        if ind:
+            ind.sort_order = i
+    db.commit()
+    return {"ok": True, "count": len(body.ordered_ids)}
 
 
 @router.get("/indicators/{indicator_id}", response_model=IndicatorOut)

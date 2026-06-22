@@ -133,6 +133,7 @@ class IndicatorOut(IndicatorBase):
     version: int
     classification_path: list[str] = []
     source_standard_title: Optional[str] = None
+    change_type: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

@@ -136,6 +136,11 @@ export const api = {
   exportVersionExcel: (id, label) => download(`/versions/${id}/export/excel`, `${label || "指标版本"}.xlsx`),
   exportVersionWord: (id, label) => download(`/versions/${id}/export/word`, `${label || "指标版本"}.docx`),
 
+  // 变更清单（新增/修改/删除）
+  getChanges: (type = "all") => request(`/indicators/changes?type=${type}`),
+  exportChangesExcel: (type = "all") => download(`/export/changes/excel?type=${type}`, "指标变更清单.xlsx"),
+  exportChangesWord: (type = "all") => download(`/export/changes/word?type=${type}`, "指标变更清单.docx"),
+
   // 上传导入（管理员）：上传主表 xlsx 批量导入
   importStandard: async (file, update = false) => {
     const form = new FormData();

@@ -3,7 +3,7 @@ import {
   LogIn, LogOut, RefreshCw, Users, ListTree, ClipboardCheck, Download,
   Search, Plus, Pencil, Trash2, MessageSquare, Check, X, ChevronRight,
   ChevronDown, KeyRound, ShieldCheck, FileText, FileSpreadsheet,
-  AlertCircle, Layers, BookOpen, Clock, UserPlus, Star, Upload, History, Move, ArrowUp, ArrowDown, GripVertical, GitBranch
+  AlertCircle, Layers, BookOpen, Clock, UserPlus, Star, Upload, History, Move, ArrowUp, ArrowDown, GripVertical, GitBranch, ClipboardList
 } from "lucide-react";
 import { api, tokenStore, setUnauthorizedHandler } from "./api";
 
@@ -166,6 +166,7 @@ export default function App() {
     { id: "hierarchy", label: "分类层级", icon: ListTree },
     { id: "accounts", label: "专家账户", icon: Users },
     { id: "history", label: "修改历史", icon: History },
+    { id: "changes", label: "变更清单", icon: ClipboardList },
     { id: "versions", label: "版本管理", icon: GitBranch },
     { id: "export", label: "导入 / 导出", icon: Download },
   ];
@@ -178,10 +179,10 @@ export default function App() {
     reloadIndicators, reloadSuggestions, reloadHierarchy, reloadUsers };
 
   return (
-    <div className="flex min-h-screen w-full bg-slate-100 font-sans text-slate-800">
+    <div className="flex h-screen w-full overflow-hidden bg-slate-100 font-sans text-slate-800">
       <aside className="flex w-60 shrink-0 flex-col bg-teal-900 text-teal-50">
         <div className="border-b border-teal-800/60 px-5 py-5"><div className="flex items-center gap-2"><Layers size={22} className="text-teal-300" /><span className="text-sm font-semibold leading-tight">健康指标标准<br />修订协作平台</span></div></div>
-        <nav className="flex-1 space-y-1 px-3 py-4">
+        <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
           {tabs.map((t) => { const Icon = t.icon; const active = tab === t.id; return (
             <button key={t.id} onClick={() => setTab(t.id)} className={`flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors ${active ? "bg-teal-700 text-white" : "text-teal-100 hover:bg-teal-800/60"}`}>
               <Icon size={17} /><span className="flex-1 text-left">{t.label}</span>
@@ -195,10 +196,13 @@ export default function App() {
         </div>
       </aside>
 
-      <main className="flex min-w-0 flex-1 flex-col">
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3">
           <h1 className="text-lg font-semibold text-slate-800">{tabs.find((t) => t.id === tab)?.label}</h1>
-          <Btn variant="ghost" size="sm" onClick={() => guard(async () => { await loadAll(user); flash("已刷新最新数据"); })}><RefreshCw size={14} /> 刷新数据</Btn>
+          <div className="flex items-center gap-1">
+            <Btn variant="ghost" size="sm" onClick={() => guard(async () => { await loadAll(user); flash("已刷新最新数据"); })}><RefreshCw size={14} /> 刷新数据</Btn>
+            <Btn variant="ghost" size="sm" onClick={handleLogout}><LogOut size={14} /> 退出登录</Btn>
+          </div>
         </header>
         <div className="min-w-0 flex-1 overflow-auto p-6">
           {tab === "browse" && <Browse {...ctx} />}
@@ -206,6 +210,7 @@ export default function App() {
           {tab === "hierarchy" && <Hierarchy {...ctx} />}
           {tab === "accounts" && <Accounts {...ctx} />}
           {tab === "history" && <History_ {...ctx} />}
+          {tab === "changes" && <Changes {...ctx} />}
           {tab === "versions" && <Versions {...ctx} />}
           {tab === "export" && <Export {...ctx} />}
           {tab === "mine" && <MySuggestions {...ctx} />}
@@ -899,6 +904,61 @@ function History_({ guard, flash }) {
         </div>
       </div>
       {rows === null ? <p className="text-sm text-slate-400">加载中…</p> : <HistoryList rows={rows} />}
+    </div>
+  );
+}
+
+/* ------------------------- 变更清单（管理员） ------------------------- */
+const CHANGE_META = {
+  added: { label: "新增", cls: "bg-emerald-100 text-emerald-700" },
+  modified: { label: "修改", cls: "bg-sky-100 text-sky-700" },
+  deleted: { label: "删除", cls: "bg-rose-100 text-rose-700" },
+};
+function Changes({ guard, flash }) {
+  const [type, setType] = useState("all");
+  const [rows, setRows] = useState(null);
+  const load = (t) => guard(async () => { setRows(null); setRows(await api.getChanges(t)); });
+  useEffect(() => { load(type); }, [type]);
+  const TYPES = [["all", "全部"], ["added", "新增"], ["modified", "修改"], ["deleted", "删除"]];
+  const counts = rows ? rows.reduce((a, r) => { a[r.change_type] = (a[r.change_type] || 0) + 1; return a; }, {}) : {};
+
+  return (
+    <div className="max-w-4xl">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-slate-500">本次修订中被<span className="text-emerald-600">新增</span>、<span className="text-sky-600">修改</span>、<span className="text-rose-600">删除</span>的指标。可按类型筛选并导出。</p>
+        <div className="flex gap-2">
+          <Btn size="sm" variant="outline" onClick={() => guard(async () => { await api.exportChangesExcel(type); flash("Excel 下载中"); })}><FileSpreadsheet size={14} /> 导出 Excel</Btn>
+          <Btn size="sm" variant="outline" onClick={() => guard(async () => { await api.exportChangesWord(type); flash("Word 下载中"); })}><FileText size={14} /> 导出 Word</Btn>
+        </div>
+      </div>
+      <div className="mb-3 flex gap-1.5">
+        {TYPES.map(([k, lbl]) => (
+          <button key={k} onClick={() => setType(k)} className={`rounded-md border px-3 py-1.5 text-sm transition-colors ${type === k ? "border-teal-500 bg-teal-50 font-medium text-teal-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{lbl}</button>
+        ))}
+        <span className="ml-auto self-center text-xs text-slate-400">{rows ? `共 ${rows.length} 项` : ""}</span>
+      </div>
+      {rows === null ? <p className="text-sm text-slate-400">加载中…</p> : rows.length === 0 ? (
+        <Empty icon={ClipboardList} text="没有符合条件的变更" />
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-slate-200">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-slate-50 text-xs text-slate-500"><tr>
+              <th className="px-3 py-2">类型</th><th className="px-3 py-2">分类</th><th className="px-3 py-2">标识符</th>
+              <th className="px-3 py-2">中文名称</th><th className="px-3 py-2">指标类型</th>
+            </tr></thead>
+            <tbody>
+              {rows.map((r) => { const m = CHANGE_META[r.change_type] || {}; return (
+                <tr key={r.id} className="border-t border-slate-100 hover:bg-slate-50">
+                  <td className="px-3 py-2"><span className={`rounded px-1.5 py-0.5 text-xs font-medium ${m.cls}`}>{m.label}</span></td>
+                  <td className="px-3 py-2 text-xs text-slate-500">{(r.classification_path || []).join(" / ") || "—"}</td>
+                  <td className="px-3 py-2 font-mono text-xs text-slate-500">{r.identifier || "—"}</td>
+                  <td className={`px-3 py-2 ${r.change_type === "deleted" ? "text-slate-400 line-through" : "text-slate-800"}`}>{r.name_cn}</td>
+                  <td className="px-3 py-2 text-xs">{r.indicator_type === "核心指标" ? <span className="text-teal-700">核心</span> : r.indicator_type === "备选指标" ? <span className="text-amber-700">备选</span> : "—"}</td>
+                </tr>); })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

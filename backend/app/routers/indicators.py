@@ -4,11 +4,47 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..security import get_current_user, require_admin
-from ..models import Indicator, IndicatorStatus, SourceStandard, User
+from ..models import Indicator, IndicatorStatus, SourceStandard, User, AuditLog
 from ..schemas import IndicatorOut, SourceStandardOut, IndicatorCreate, IndicatorUpdate, ReorderBody
 from ..utils import indicator_out, audit, change_detail
 
 router = APIRouter(tags=["指标"])
+
+CHANGE_LABELS = {"added": "新增", "modified": "修改", "deleted": "删除"}
+
+
+def change_map(db: Session) -> dict[int, str]:
+    """根据审计记录与状态/版本，判定每个指标在本次修订中的变更类型。
+    优先级：删除 > 新增 > 修改 > 未变更。"""
+    created = {r[0] for r in db.query(AuditLog.entity_id).filter(
+        AuditLog.entity_type == "indicator", AuditLog.action.in_(["admin_create", "accept_add"])).all()}
+    out = {}
+    for ind in db.query(Indicator).all():
+        if ind.status == IndicatorStatus.deleted:
+            out[ind.id] = "deleted"
+        elif ind.id in created:
+            out[ind.id] = "added"
+        elif (ind.version or 1) > 1:
+            out[ind.id] = "modified"
+        else:
+            out[ind.id] = "none"
+    return out
+
+
+@router.get("/indicators/changes", response_model=list[IndicatorOut],
+            summary="变更清单：新增/修改/删除的指标（管理员）")
+def list_changes(type: str = Query("all", pattern="^(all|added|modified|deleted)$"),
+                 db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    cmap = change_map(db)
+    wanted = {"added", "modified", "deleted"} if type == "all" else {type}
+    rows = []
+    for ind in db.query(Indicator).order_by(Indicator.sort_order, Indicator.identifier).all():
+        ct = cmap.get(ind.id, "none")
+        if ct in wanted:
+            data = indicator_out(db, ind)
+            data.change_type = ct
+            rows.append(data)
+    return rows
 
 
 @router.get("/indicators", response_model=list[IndicatorOut], summary="指标列表（支持搜索/分类/状态筛选）")

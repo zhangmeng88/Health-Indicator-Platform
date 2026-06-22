@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   LogIn, LogOut, RefreshCw, Users, ListTree, ClipboardCheck, Download,
   Search, Plus, Pencil, Trash2, MessageSquare, Check, X, ChevronRight,
@@ -251,6 +251,8 @@ function Browse(ctx) {
   const [q, setQ] = useState(""); const [classFilter, setClassFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [selId, setSelId] = useState(null); const [modal, setModal] = useState(null);
+  const rightRef = useRef(null);
+  useEffect(() => { if (rightRef.current) rightRef.current.scrollTop = 0; }, [selId]);
   const flat = useMemo(() => flatten(hierarchy), [hierarchy]);
   const byClassFull = useMemo(() => {
     const m = {};   // indicators 已由后端按 (sort_order, identifier) 排好序，保持其顺序
@@ -278,9 +280,9 @@ function Browse(ctx) {
   const sel = indicators.find((i) => i.id === selId) || null;
 
   return (
-    <div className="grid grid-cols-1 gap-5 lg:grid-cols-5">
-      <div className="lg:col-span-2">
-        <div className="mb-3 flex flex-col gap-2">
+    <div className="flex flex-col gap-5 lg:h-full lg:flex-row lg:gap-6">
+      <div className="flex flex-col lg:min-h-0 lg:w-2/5">
+        <div className="mb-3 flex shrink-0 flex-col gap-2">
           <div className="relative"><Search size={15} className="absolute left-3 top-2.5 text-slate-400" />
             <input className={`${inputCls} pl-9`} placeholder="搜索中文名称 / 标识符" value={q} onChange={(e) => setQ(e.target.value)} /></div>
           <div className="flex gap-2">
@@ -295,7 +297,7 @@ function Browse(ctx) {
             <Btn size="sm" onClick={() => setModal({ type: "add" })}><Plus size={15} /> {user.role === "admin" ? "新增指标" : "建议新增"}</Btn>
           </div>
         </div>
-        <div className="space-y-1">
+        <div className="space-y-1 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
           {filtered.length === 0 && <Empty icon={BookOpen} text="未找到匹配的指标" />}
           {filtered.length > 0 && (() => {
             const byClass = {};
@@ -351,9 +353,9 @@ function Browse(ctx) {
             </>);
           })()}
         </div>
-        <p className="mt-3 text-xs text-slate-400">共 {filtered.length} / {indicators.length} 项</p>
+        <p className="mt-2 shrink-0 text-xs text-slate-400">共 {filtered.length} / {indicators.length} 项</p>
       </div>
-      <div className="lg:col-span-3">
+      <div ref={rightRef} className="lg:min-h-0 lg:w-3/5 lg:overflow-y-auto lg:pr-1">
         {!sel ? <div className="rounded-lg border border-slate-200 bg-white"><Empty icon={BookOpen} text="从左侧选择一个指标查看详情" /></div>
           : <IndicatorDetail key={sel.id} indicator={sel} ctx={ctx} onEdit={() => setModal({ type: "edit", indicator: sel })} onDelete={() => setModal({ type: "delete", indicator: sel })} />}
       </div>
